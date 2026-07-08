@@ -7,7 +7,7 @@ pragma solidity ^0.8.28;
 /// Anyone may deposit; the sub-solver withdraws subject to a cooldown.
 /// The operator holds exclusive debit authority for revert penalties (Track A)
 /// and EBBO passthrough (Track B). Debited funds are swept to the owner.
-contract BYOSEscrow {
+contract Escrow {
     // --- State ---
     mapping(address => uint256) public deposits;
     mapping(address => uint256) public withdrawalRequestedAt;

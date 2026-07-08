@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {BYOSEscrow} from "../../src/contracts/BYOSEscrow.sol";
+import {Escrow} from "../../src/contracts/Escrow.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract BYOSEscrowTest is Test {
-    BYOSEscrow escrow;
+contract EscrowTest is Test {
+    Escrow escrow;
     address owner;
     address op;
     address solver;
@@ -18,7 +18,7 @@ contract BYOSEscrowTest is Test {
         op = makeAddr("operator");
         solver = makeAddr("solver");
         solver2 = makeAddr("solver2");
-        escrow = new BYOSEscrow(owner, op, COOLDOWN);
+        escrow = new Escrow(owner, op, COOLDOWN);
     }
 
     // --- Constructor ---
@@ -30,8 +30,8 @@ contract BYOSEscrowTest is Test {
     }
 
     function test_constructor_reverts_zero_owner() public {
-        vm.expectRevert(BYOSEscrow.ZeroAddress.selector);
-        new BYOSEscrow(address(0), op, COOLDOWN);
+        vm.expectRevert(Escrow.ZeroAddress.selector);
+        new Escrow(address(0), op, COOLDOWN);
     }
 
     // --- Deposit ---
@@ -68,14 +68,14 @@ contract BYOSEscrowTest is Test {
     function test_debit_reverts_non_operator() public {
         escrow.deposit{value: 10 ether}(solver);
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.OnlyOperator.selector);
+        vm.expectRevert(Escrow.OnlyOperator.selector);
         escrow.debit(solver, 1 ether, keccak256("reason"));
     }
 
     function test_debit_reverts_exceeding_balance() public {
         escrow.deposit{value: 1 ether}(solver);
         vm.prank(op);
-        vm.expectRevert(BYOSEscrow.InsufficientBalance.selector);
+        vm.expectRevert(Escrow.InsufficientBalance.selector);
         escrow.debit(solver, 2 ether, keccak256("reason"));
     }
 
@@ -107,13 +107,13 @@ contract BYOSEscrowTest is Test {
 
         vm.warp(block.timestamp + COOLDOWN - 1);
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.CooldownNotElapsed.selector);
+        vm.expectRevert(Escrow.CooldownNotElapsed.selector);
         escrow.executeWithdrawal();
     }
 
     function test_withdrawal_request_reverts_if_no_balance() public {
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.InsufficientBalance.selector);
+        vm.expectRevert(Escrow.InsufficientBalance.selector);
         escrow.requestWithdrawal();
     }
 
@@ -123,7 +123,7 @@ contract BYOSEscrowTest is Test {
         escrow.requestWithdrawal();
 
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.WithdrawalAlreadyRequested.selector);
+        vm.expectRevert(Escrow.WithdrawalAlreadyRequested.selector);
         escrow.requestWithdrawal();
     }
 
@@ -140,7 +140,7 @@ contract BYOSEscrowTest is Test {
 
     function test_cancel_withdrawal_reverts_if_none_pending() public {
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.NoWithdrawalRequested.selector);
+        vm.expectRevert(Escrow.NoWithdrawalRequested.selector);
         escrow.cancelWithdrawal();
     }
 
@@ -176,7 +176,7 @@ contract BYOSEscrowTest is Test {
         escrow.freeze(solver);
 
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.AccountFrozen.selector);
+        vm.expectRevert(Escrow.AccountFrozen.selector);
         escrow.executeWithdrawal();
     }
 
@@ -214,7 +214,7 @@ contract BYOSEscrowTest is Test {
 
     function test_freeze_reverts_non_operator() public {
         vm.prank(solver);
-        vm.expectRevert(BYOSEscrow.OnlyOperator.selector);
+        vm.expectRevert(Escrow.OnlyOperator.selector);
         escrow.freeze(solver);
     }
 
@@ -231,7 +231,7 @@ contract BYOSEscrowTest is Test {
     }
 
     function test_withdraw_debits_reverts_if_nothing() public {
-        vm.expectRevert(BYOSEscrow.NothingToWithdraw.selector);
+        vm.expectRevert(Escrow.NothingToWithdraw.selector);
         escrow.withdrawDebits();
     }
 
@@ -269,17 +269,17 @@ contract BYOSEscrowTest is Test {
 
     function test_transfer_ownership_reverts_zero_address() public {
         vm.prank(owner);
-        vm.expectRevert(BYOSEscrow.ZeroAddress.selector);
+        vm.expectRevert(Escrow.ZeroAddress.selector);
         escrow.transferOwnership(address(0));
     }
 
     function test_owner_functions_revert_non_owner() public {
         vm.startPrank(solver);
-        vm.expectRevert(BYOSEscrow.OnlyOwner.selector);
+        vm.expectRevert(Escrow.OnlyOwner.selector);
         escrow.setOperator(solver);
-        vm.expectRevert(BYOSEscrow.OnlyOwner.selector);
+        vm.expectRevert(Escrow.OnlyOwner.selector);
         escrow.setCooldownPeriod(0);
-        vm.expectRevert(BYOSEscrow.OnlyOwner.selector);
+        vm.expectRevert(Escrow.OnlyOwner.selector);
         escrow.transferOwnership(solver);
         vm.stopPrank();
     }
