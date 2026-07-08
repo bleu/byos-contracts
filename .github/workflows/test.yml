@@ -1,0 +1,48 @@
+name: Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**.sol'
+      - '**.yml'
+      - '**.toml'
+      - 'lib/**'
+      - '.gitmodules'
+  push:
+    branches:
+      - main
+    paths:
+      - '**.sol'
+      - '**.yml'
+      - '**.toml'
+      - 'lib/**'
+      - '.gitmodules'
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  test:
+    strategy:
+      fail-fast: true
+
+    name: Foundry tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run Forge build
+        run: |
+          forge --version
+          forge build --sizes
+        id: build
+
+      - name: Run Forge tests
+        run: forge test -vvv
+        id: test
