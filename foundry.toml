@@ -11,6 +11,9 @@ evm_version = "cancun"
 
 deny = "warnings"
 
+[lint]
+exclude_lints = ["block-timestamp"]
+
 [fmt]
 sort_imports = true
 
