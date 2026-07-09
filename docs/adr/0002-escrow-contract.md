@@ -26,7 +26,7 @@ Rejected: Option B (per-proposal EIP-712 signature verification on-chain). Trust
 
 Two distinct roles with separated concerns:
 
-- **Owner** — a secure wallet (e.g., multisig/Safe) that owns the contract. Can set the operator, configure parameters (cooldown period), transfer ownership, and withdraw accumulated debits. All debited funds flow to the owner.
+- **Owner** — a secure wallet (e.g., multisig/Safe) that owns the contract. Can set the operator, configure parameters (cooldown period), transfer ownership, and withdraw accumulated debits. All debited funds flow to the owner. Ownership transfer is two-step: owner calls `transferOwnership(newOwner)` to nominate a `pendingOwner`, then the pending owner calls `acceptOwnership()` to finalize. This prevents irrecoverable loss from address typos.
 - **Operator** — an EOA that sits in the BYOS service for automated operation. Can debit sub-solvers, freeze, and unfreeze. Cannot withdraw funds or change configuration.
 
 **Why separate?** The operator's private key is more exposed (lives in the BYOS service). If compromised, the attacker can debit sub-solver balances — but those funds go to the owner, not the attacker. The owner (cold wallet) can replace a compromised operator immediately. This limits the blast radius of a key compromise to griefing (illegitimate debits), not theft.
@@ -34,7 +34,7 @@ Two distinct roles with separated concerns:
 ### Withdrawal semantics (Q5): all-or-nothing with cooldown
 
 - **`requestWithdrawal()`** — sub-solver signals intent to withdraw their entire balance. Effective balance drops to 0 immediately (sub-solver is offline for new proposals). Cooldown clock starts.
-- **`executeWithdrawal()`** — after cooldown expires, sub-solver withdraws their full remaining balance (deposits − totalDebited). No partial withdrawals.
+- **`executeWithdrawal()`** — after cooldown expires, sub-solver withdraws their full remaining balance. No partial withdrawals.
 - **`cancelWithdrawal()`** — sub-solver aborts the withdrawal request, effective balance restores, back online. Can be called regardless of freeze state (funds staying in the contract is always safe).
 
 All-or-nothing eliminates partial withdrawal edge cases and balance fragmentation. A sub-solver who wants to reduce their position does a full cycle (withdraw → re-deposit).
@@ -76,19 +76,21 @@ No per-debit caps, no freeze timeouts, no challenge windows enforced on-chain. D
 ```solidity
 contract Escrow {
     // --- State ---
-    mapping(address => uint256) public deposits;
+    mapping(address => uint256) public balances;
     mapping(address => uint256) public withdrawalRequestedAt;
-    mapping(address => uint256) public totalDebited;
     mapping(address => bool) public frozen;
 
     address public owner;
+    address public pendingOwner;
     address public operator;
     uint256 public cooldownPeriod;
+    uint256 public accumulatedDebits;
 
     // --- Owner-only ---
     function setOperator(address newOperator) external;
     function setCooldownPeriod(uint256 period) external;
     function transferOwnership(address newOwner) external;
+    function acceptOwnership() external; // only callable by pendingOwner
 
     // --- Operator-only ---
     function debit(address subSolver, uint256 amount, bytes32 reason) external;
@@ -104,7 +106,7 @@ contract Escrow {
     function deposit(address subSolver) external payable;
     function withdrawDebits() external;
 
-    // --- Views (computed, not direct storage reads) ---
+    // --- Views ---
     function balance(address subSolver) external view returns (uint256);
     function effectiveBalance(address subSolver) external view returns (uint256);
     function withdrawableBalance() external view returns (uint256);
@@ -120,14 +122,17 @@ contract Escrow {
     event WithdrawalRequested(address indexed subSolver);
     event WithdrawalCancelled(address indexed subSolver);
     event CooldownPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
-    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 }
 ```
 
+**State design:** A single `balances` mapping tracks each sub-solver's current balance directly — deposits add to it, debits subtract from it, withdrawal zeroes it. This avoids indefinite accumulation of stale `deposits`/`totalDebited` counters for long-lived sub-solvers who never do a full withdrawal cycle. The cumulative history is available via events.
+
 **View semantics:**
-- `balance(S)` = `deposits[S] − totalDebited[S]`
-- `effectiveBalance(S)` = `0` if withdrawal pending, else `balance(S)`. Freeze does not affect this — reserve logic lives in the BYOS service layer.
-- `withdrawableBalance()` = accumulated debit pool available for owner withdrawal.
+- `balance(S)` = `balances[S]` (direct read).
+- `effectiveBalance(S)` = `0` if withdrawal pending, else `balances[S]`. Freeze does not affect this — reserve logic lives in the BYOS service layer.
+- `withdrawableBalance()` = `accumulatedDebits` — the debit pool available for owner withdrawal.
 
 ## Alternatives considered
 
@@ -138,6 +143,8 @@ contract Escrow {
 - **Partial withdrawals:** Allowing sub-solvers to withdraw specific amounts. Rejected — all-or-nothing eliminates edge cases around balance fragmentation and pending-withdrawal accounting.
 - **On-chain dispute mechanisms (debit caps, freeze timeouts):** Rejected for v1 — adds complexity for a small initial sub-solver base with direct off-chain relationships. Can be layered in later.
 - **Upgradeable proxy:** Rejected — immutability is a trust signal; migration via withdraw/re-deposit is straightforward given the cooldown mechanism.
+- **Separate `deposits` and `totalDebited` mappings:** Original design used two mappings with `balance = deposits - totalDebited`. Rejected — both values accumulate indefinitely for sub-solvers who never do a full withdrawal, and the subtraction introduces an underflow surface. A single `balances` mapping is simpler and eliminates both issues.
+- **Direct ownership transfer:** Original design transferred ownership in a single call. Rejected — a typo in the new owner address would irrecoverably brick the contract. Two-step transfer (`transferOwnership` + `acceptOwnership`) ensures the new owner can actually act.
 
 ## Consequences
 
