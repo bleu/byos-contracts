@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {BYOSTrampoline} from "../src/contracts/BYOSTrampoline.sol";
 import {Escrow} from "../src/contracts/Escrow.sol";
 import {Script, console} from "forge-std/Script.sol";
 
@@ -15,9 +14,6 @@ contract Deploy is Script {
 
         Escrow escrow = new Escrow(escrowOwner, escrowOperator, cooldownPeriod);
         console.log("Escrow deployed at:", address(escrow));
-
-        BYOSTrampoline trampoline = new BYOSTrampoline();
-        console.log("BYOSTrampoline deployed at:", address(trampoline));
 
         vm.stopBroadcast();
     }
