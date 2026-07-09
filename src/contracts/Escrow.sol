@@ -9,15 +9,25 @@ pragma solidity ^0.8.28;
 /// and EBBO passthrough (Track B). Debited funds are swept to the owner.
 contract Escrow {
     // --- State ---
+
+    /// @notice Total native token deposited by each sub-solver (only resets on withdrawal).
     mapping(address => uint256) public deposits;
+    /// @notice Timestamp of pending withdrawal request, or 0 if none.
     mapping(address => uint256) public withdrawalRequestedAt;
+    /// @notice Cumulative amount debited from each sub-solver (only resets on withdrawal).
     mapping(address => uint256) public totalDebited;
+    /// @notice Whether a sub-solver is frozen (blocks executeWithdrawal).
     mapping(address => bool) public frozen;
 
+    /// @notice Contract owner — receives debited funds, can configure parameters.
     address public owner;
+    /// @notice Address that must call acceptOwnership() to finalize a transfer.
     address public pendingOwner;
+    /// @notice Automated EOA used by the BYOS service for debit/freeze operations.
     address public operator;
+    /// @notice Seconds a sub-solver must wait between requestWithdrawal and executeWithdrawal.
     uint256 public cooldownPeriod;
+    /// @notice Debit pool not yet swept to the owner via withdrawDebits().
     uint256 public accumulatedDebits;
 
     // --- Events ---
@@ -127,6 +137,7 @@ contract Escrow {
     function debit(address subSolver, uint256 amount, bytes32 reason) external onlyOperator {
         if (amount > _balance(subSolver)) revert InsufficientBalance();
         totalDebited[subSolver] += amount;
+        // Track debits for later sweep to owner
         accumulatedDebits += amount;
         emit Debited(subSolver, amount, reason);
     }
@@ -162,11 +173,13 @@ contract Escrow {
 
         uint256 amount = _balance(msg.sender);
 
+        // Reset all sub-solver accounting before external call (CEI pattern)
         deposits[msg.sender] = 0;
         totalDebited[msg.sender] = 0;
         withdrawalRequestedAt[msg.sender] = 0;
 
         if (amount > 0) {
+            // Send remaining balance (deposits - debits) to the sub-solver
             (bool success,) = msg.sender.call{value: amount}("");
             if (!success) revert TransferFailed();
         }
@@ -197,6 +210,7 @@ contract Escrow {
         if (amount == 0) revert NothingToWithdraw();
         accumulatedDebits = 0;
 
+        // Send accumulated debits to owner
         (bool success,) = owner.call{value: amount}("");
         if (!success) revert TransferFailed();
 
