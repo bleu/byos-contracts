@@ -103,8 +103,7 @@ contract EscrowTest is Test {
         escrow.deposit{value: 4 ether}(subSolver);
         assertEq(escrow.balance(subSolver), 4 ether);
         assertEq(escrow.effectiveBalance(subSolver), 4 ether);
-        assertEq(escrow.deposits(subSolver), 4 ether);
-        assertEq(escrow.totalDebited(subSolver), 0);
+        assertEq(escrow.balances(subSolver), 4 ether);
 
         // Second withdrawal cycle
         vm.prank(subSolver);
@@ -114,8 +113,7 @@ contract EscrowTest is Test {
         escrow.executeWithdrawal();
 
         assertEq(escrow.balance(subSolver), 0);
-        assertEq(escrow.deposits(subSolver), 0);
-        assertEq(escrow.totalDebited(subSolver), 0);
+        assertEq(escrow.balances(subSolver), 0);
         assertEq(escrow.withdrawalRequestedAt(subSolver), 0);
     }
 
@@ -415,8 +413,7 @@ contract EscrowTest is Test {
 
         // Sub-solver gets nothing, state is fully cleared
         assertEq(subSolver.balance, 0);
-        assertEq(escrow.deposits(subSolver), 0);
-        assertEq(escrow.totalDebited(subSolver), 0);
+        assertEq(escrow.balances(subSolver), 0);
         assertEq(escrow.withdrawalRequestedAt(subSolver), 0);
     }
 
