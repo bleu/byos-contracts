@@ -66,6 +66,15 @@ contract Escrow {
         if (msg.sender != operator) revert OnlyOperator();
     }
 
+    /// @dev Returns deposits minus totalDebited for a sub-solver, reverting with
+    /// InsufficientBalance if the invariant (deposits >= totalDebited) is broken.
+    function _balance(address subSolver) internal view returns (uint256) {
+        uint256 deposited = deposits[subSolver];
+        uint256 debited = totalDebited[subSolver];
+        if (debited > deposited) revert InsufficientBalance();
+        return deposited - debited;
+    }
+
     /// @param _owner Secure wallet (e.g. multisig) that owns the contract. Receives debited funds.
     /// @param _operator EOA used by the BYOS service for automated debit/freeze operations.
     /// @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal.
@@ -116,7 +125,7 @@ contract Escrow {
     /// @param amount The amount to debit in native token.
     /// @param reason An identifier for the debit (e.g. tx hash for Track A, claim ID for Track B).
     function debit(address subSolver, uint256 amount, bytes32 reason) external onlyOperator {
-        if (amount > deposits[subSolver] - totalDebited[subSolver]) revert InsufficientBalance();
+        if (amount > _balance(subSolver)) revert InsufficientBalance();
         totalDebited[subSolver] += amount;
         accumulatedDebits += amount;
         emit Debited(subSolver, amount, reason);
@@ -140,7 +149,7 @@ contract Escrow {
     /// The sub-solver must wait for the cooldown period before executing.
     function requestWithdrawal() external {
         if (withdrawalRequestedAt[msg.sender] != 0) revert WithdrawalAlreadyRequested();
-        if (deposits[msg.sender] <= totalDebited[msg.sender]) revert InsufficientBalance();
+        if (_balance(msg.sender) == 0) revert InsufficientBalance();
         withdrawalRequestedAt[msg.sender] = block.timestamp;
         emit WithdrawalRequested(msg.sender);
     }
@@ -151,7 +160,7 @@ contract Escrow {
         if (frozen[msg.sender]) revert AccountFrozen();
         if (block.timestamp < withdrawalRequestedAt[msg.sender] + cooldownPeriod) revert CooldownNotElapsed();
 
-        uint256 amount = deposits[msg.sender] - totalDebited[msg.sender];
+        uint256 amount = _balance(msg.sender);
 
         deposits[msg.sender] = 0;
         totalDebited[msg.sender] = 0;
@@ -198,14 +207,14 @@ contract Escrow {
 
     /// @notice Sub-solver's current balance (deposits minus debits).
     function balance(address subSolver) external view returns (uint256) {
-        return deposits[subSolver] - totalDebited[subSolver];
+        return _balance(subSolver);
     }
 
     /// @notice Sub-solver's effective balance for proposal eligibility.
     /// Returns 0 if a withdrawal is pending, otherwise returns the balance.
     function effectiveBalance(address subSolver) external view returns (uint256) {
         if (withdrawalRequestedAt[subSolver] != 0) return 0;
-        return deposits[subSolver] - totalDebited[subSolver];
+        return _balance(subSolver);
     }
 
     /// @notice Amount of accumulated debits available for owner withdrawal.
