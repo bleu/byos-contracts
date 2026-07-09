@@ -15,6 +15,7 @@ contract Escrow {
     mapping(address => bool) public frozen;
 
     address public owner;
+    address public pendingOwner;
     address public operator;
     uint256 public cooldownPeriod;
     uint256 public accumulatedDebits;
@@ -30,7 +31,8 @@ contract Escrow {
     event WithdrawalRequested(address indexed subSolver);
     event WithdrawalCancelled(address indexed subSolver);
     event CooldownPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
-    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     // --- Errors ---
     error OnlyOwner();
@@ -43,6 +45,7 @@ contract Escrow {
     error WithdrawalAlreadyRequested();
     error ZeroAddress();
     error NothingToWithdraw();
+    error OnlyPendingOwner();
 
     // --- Modifiers ---
     modifier onlyOwner() {
@@ -89,12 +92,21 @@ contract Escrow {
         emit CooldownPeriodUpdated(oldPeriod, period);
     }
 
-    /// @notice Transfer contract ownership to a new address.
+    /// @notice Start a two-step ownership transfer. The new owner must call acceptOwnership().
+    /// Calling again overrides any pending transfer.
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    /// @notice Accept a pending ownership transfer. Only callable by the pending owner.
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
         address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
+        owner = msg.sender;
+        pendingOwner = address(0);
+        emit OwnershipTransferred(oldOwner, msg.sender);
     }
 
     // --- Operator-only ---

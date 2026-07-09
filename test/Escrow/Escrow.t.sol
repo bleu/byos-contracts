@@ -295,11 +295,54 @@ contract EscrowTest is Test {
         assertEq(escrow.cooldownPeriod(), 7 days);
     }
 
-    function test_transfer_ownership() public {
+    function test_transfer_ownership_two_step() public {
+        address newOwner = makeAddr("newOwner");
+
+        // Step 1: initiate transfer — owner does not change yet
+        vm.prank(owner);
+        escrow.transferOwnership(newOwner);
+        assertEq(escrow.owner(), owner);
+        assertEq(escrow.pendingOwner(), newOwner);
+
+        // Step 2: new owner accepts
+        vm.prank(newOwner);
+        escrow.acceptOwnership();
+        assertEq(escrow.owner(), newOwner);
+        assertEq(escrow.pendingOwner(), address(0));
+    }
+
+    function test_transfer_ownership_second_call_overrides_first() public {
+        address firstCandidate = makeAddr("first");
+        address secondCandidate = makeAddr("second");
+
+        vm.prank(owner);
+        escrow.transferOwnership(firstCandidate);
+        assertEq(escrow.pendingOwner(), firstCandidate);
+
+        // Owner changes their mind
+        vm.prank(owner);
+        escrow.transferOwnership(secondCandidate);
+        assertEq(escrow.pendingOwner(), secondCandidate);
+
+        // First candidate cannot accept
+        vm.prank(firstCandidate);
+        vm.expectRevert(Escrow.OnlyPendingOwner.selector);
+        escrow.acceptOwnership();
+
+        // Second candidate can
+        vm.prank(secondCandidate);
+        escrow.acceptOwnership();
+        assertEq(escrow.owner(), secondCandidate);
+    }
+
+    function test_accept_ownership_reverts_non_pending_owner() public {
         address newOwner = makeAddr("newOwner");
         vm.prank(owner);
         escrow.transferOwnership(newOwner);
-        assertEq(escrow.owner(), newOwner);
+
+        vm.prank(solver);
+        vm.expectRevert(Escrow.OnlyPendingOwner.selector);
+        escrow.acceptOwnership();
     }
 
     function test_transfer_ownership_reverts_zero_address() public {
@@ -538,7 +581,10 @@ contract EscrowTest is Test {
         address newOwner = makeAddr("newOwner");
         vm.prank(owner);
         escrow.transferOwnership(newOwner);
+        vm.prank(newOwner);
+        escrow.acceptOwnership();
 
+        // Old owner can no longer act
         vm.prank(owner);
         vm.expectRevert(Escrow.OnlyOwner.selector);
         escrow.setOperator(makeAddr("x"));
@@ -638,8 +684,13 @@ contract EscrowTest is Test {
         address newOwner = makeAddr("newOwner");
         vm.prank(owner);
         vm.expectEmit(true, true, false, false);
-        emit Escrow.OwnershipTransferred(owner, newOwner);
+        emit Escrow.OwnershipTransferStarted(owner, newOwner);
         escrow.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        vm.expectEmit(true, true, false, false);
+        emit Escrow.OwnershipTransferred(owner, newOwner);
+        escrow.acceptOwnership();
     }
 
     function test_withdraw_debits_emits_event() public {
