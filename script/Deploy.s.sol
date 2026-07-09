@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {Escrow} from "../src/contracts/Escrow.sol";
 import {BYOSTrampoline} from "../src/contracts/BYOSTrampoline.sol";
+import {Escrow} from "../src/contracts/Escrow.sol";
 import {Script, console} from "forge-std/Script.sol";
 
 contract Deploy is Script {
