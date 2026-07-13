@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Trampoline} from "../../src/contracts/Trampoline.sol";
 import {TrampolineFactory} from "../../src/contracts/TrampolineFactory.sol";
-import {MockRouter, MockWETH, Reverter, TestERC20} from "./Mocks.sol";
+import {MockRouter, MockWETH, Reverter, TestERC20} from "../mocks/Mocks.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract TrampolineTest is Test {
