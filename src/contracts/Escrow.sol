@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {TrampolineFactory} from "./TrampolineFactory.sol";
+
 /// @title BYOS Escrow
 /// @author CoW Protocol Developers
 /// @notice Per-chain, native-token escrow holding sub-solver collateral keyed by sub-solver address.
@@ -27,6 +29,8 @@ contract Escrow {
     uint256 public cooldownPeriod;
     /// @notice Debit pool not yet swept to the owner via withdrawDebits().
     uint256 public accumulatedDebits;
+    /// @notice Factory that deploys a sub-solver's Trampoline on first deposit (ADR-0003).
+    TrampolineFactory public immutable trampolineFactory;
 
     // --- Events ---
     event Deposited(address indexed subSolver, uint256 amount);
@@ -77,11 +81,13 @@ contract Escrow {
     /// @param _owner Secure wallet (e.g. multisig) that owns the contract. Receives debited funds.
     /// @param _operator EOA used by the BYOS service for automated debit/freeze operations.
     /// @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal.
-    constructor(address _owner, address _operator, uint256 _cooldownPeriod) {
-        if (_owner == address(0)) revert ZeroAddress();
+    /// @param _trampolineFactory Deployer of per-sub-solver Trampoline instances.
+    constructor(address _owner, address _operator, uint256 _cooldownPeriod, TrampolineFactory _trampolineFactory) {
+        if (_owner == address(0) || address(_trampolineFactory) == address(0)) revert ZeroAddress();
         owner = _owner;
         operator = _operator;
         cooldownPeriod = _cooldownPeriod;
+        trampolineFactory = _trampolineFactory;
     }
 
     // --- Owner-only ---
@@ -184,12 +190,13 @@ contract Escrow {
 
     // --- Anyone ---
 
-    /// @notice Deposit native token into a sub-solver's escrow balance.
+    /// @notice Deposit native token into a sub-solver's escrow balance. The first
+    /// deposit for a sub-solver also deploys its Trampoline instance, so the deploy
+    /// gas is paid by the depositing party (ADR-0003, deploy-at-deposit-time).
     /// @param subSolver The sub-solver address to credit.
     function deposit(address subSolver) external payable {
-        // TODO: deploy the sub-solver's Trampoline instance via the factory on first
-        // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
         balances[subSolver] += msg.value;
+        trampolineFactory.ensureDeployed(subSolver);
         emit Deposited(subSolver, msg.value);
     }
 

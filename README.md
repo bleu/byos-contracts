@@ -6,8 +6,9 @@ Solidity contracts for the **Bring Your Own Solver (BYOS)** project — a bonded
 
 | Contract | Status | Description |
 |----------|--------|-------------|
-| [Escrow](src/contracts/Escrow.sol) | implemented | Per-chain, native-token collateral keyed by sub-solver address. Deposits, debits (Track A revert penalties / Track B EBBO passthrough), freeze/unfreeze, and all-or-nothing withdrawal with cooldown. |
-| Trampoline | planned | Per-sub-solver execution sandbox: receives `sellAmount`, runs the sub-solver's signed route in a fund-less context, returns `buyAmount` to `GPv2Settlement`. Specified in ADRs 0001, 0003, and 0005. |
+| [Escrow](src/contracts/Escrow.sol) | implemented | Per-chain, native-token collateral keyed by sub-solver address. Deposits, debits (Track A revert penalties / Track B EBBO passthrough), freeze/unfreeze, and all-or-nothing withdrawal with cooldown. First deposit for a sub-solver deploys its Trampoline. |
+| [Trampoline](src/contracts/Trampoline.sol) | implemented | Per-sub-solver execution sandbox: verifies the sub-solver's EIP-712 proposal signature (including the route hash and expiry), runs the signed route in a fund-less context, and settles back exactly `buyAmount` to `GPv2Settlement` (native ETH via the `0xeee…` marker). Immutable, no admin key. |
+| [TrampolineFactory](src/contracts/TrampolineFactory.sol) | implemented | CREATE2 deployer for Trampoline instances (salt = sub-solver address) and the EIP-712 domain anchor for proposal signatures. `ensureDeployed` is idempotent and permissionless. |
 
 ## Architecture
 
@@ -40,13 +41,21 @@ forge build
 forge test
 ```
 
+The fork suite (`test/fork/`) drives a real `GPv2Settlement.settle()` on mainnet state
+and needs an RPC endpoint; it skips cleanly when the variable is unset:
+
+```bash
+MAINNET_RPC_URL=<url> forge test --match-path 'test/fork/*'
+```
+
 ### Deploy
 
 ```bash
 ESCROW_OWNER=<address> ESCROW_OPERATOR=<address> forge script script/Deploy.s.sol --broadcast
 ```
 
-Optional: `COOLDOWN_PERIOD` (default: 1 day).
+Deploys the TrampolineFactory and the Escrow wired to it. Optional: `COOLDOWN_PERIOD`
+(default: 1 day) and `SETTLEMENT` (default: the canonical GPv2Settlement address).
 
 ## License
 

@@ -2,10 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {Escrow} from "../../src/contracts/Escrow.sol";
+import {TrampolineFactory} from "../../src/contracts/TrampolineFactory.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract EscrowTest is Test {
     Escrow escrow;
+    TrampolineFactory factory;
     address owner;
     address op;
     address subSolver;
@@ -18,7 +20,8 @@ contract EscrowTest is Test {
         op = makeAddr("operator");
         subSolver = makeAddr("subSolver");
         subSolver2 = makeAddr("subSolver2");
-        escrow = new Escrow(owner, op, COOLDOWN);
+        factory = new TrampolineFactory(makeAddr("settlement"));
+        escrow = new Escrow(owner, op, COOLDOWN, factory);
     }
 
     // --- Constructor ---
@@ -27,11 +30,17 @@ contract EscrowTest is Test {
         assertEq(escrow.owner(), owner);
         assertEq(escrow.operator(), op);
         assertEq(escrow.cooldownPeriod(), COOLDOWN);
+        assertEq(address(escrow.trampolineFactory()), address(factory));
     }
 
     function test_constructor_reverts_zero_owner() public {
         vm.expectRevert(Escrow.ZeroAddress.selector);
-        new Escrow(address(0), op, COOLDOWN);
+        new Escrow(address(0), op, COOLDOWN, factory);
+    }
+
+    function test_constructor_reverts_zero_factory() public {
+        vm.expectRevert(Escrow.ZeroAddress.selector);
+        new Escrow(owner, op, COOLDOWN, TrampolineFactory(address(0)));
     }
 
     // --- Deposit ---
@@ -53,6 +62,15 @@ contract EscrowTest is Test {
         vm.prank(subSolver2);
         escrow.deposit{value: 1 ether}(subSolver);
         assertEq(escrow.balance(subSolver), 1 ether);
+    }
+
+    function test_deposit_deploys_trampoline_on_first_deposit() public {
+        address predicted = factory.addressOf(subSolver);
+        assertEq(predicted.code.length, 0);
+
+        escrow.deposit{value: 1 ether}(subSolver);
+
+        assertGt(predicted.code.length, 0);
     }
 
     // --- Debit ---
@@ -508,7 +526,7 @@ contract EscrowTest is Test {
 
     function test_withdraw_debits_reverts_if_owner_rejects_eth() public {
         RejectETH rejector = new RejectETH();
-        Escrow escrowBadOwner = new Escrow(address(rejector), op, COOLDOWN);
+        Escrow escrowBadOwner = new Escrow(address(rejector), op, COOLDOWN, factory);
         escrowBadOwner.deposit{value: 10 ether}(subSolver);
 
         vm.prank(op);

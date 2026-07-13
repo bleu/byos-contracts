@@ -98,8 +98,9 @@ or uniqueness enforcement, either on-chain (trampoline) or off-chain (BYOS).
 
 Replay of a settled proposal is prevented by `GPv2Settlement`'s fill tracking (a filled
 order can't be settled again). Replaying a reverted proposal would revert again.
-`validUntil` bounds the time window. Keeping the trampoline storage-free (no nonce
-mapping) preserves the immutable, minimal contract design.
+`validUntil` bounds the time window and is enforced on-chain: `execute` reverts once it
+has passed. Keeping the trampoline storage-free (no nonce mapping) preserves the
+immutable, minimal contract design.
 
 ### Proposal payload shape: raw interactions
 
