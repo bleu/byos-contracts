@@ -2,6 +2,9 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {
+    IAccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 
 import {Escrow} from "../../src/contracts/Escrow.sol";
 import {Test} from "forge-std/Test.sol";
@@ -14,6 +17,7 @@ contract EscrowTest is Test {
     address subSolver2;
 
     uint256 constant COOLDOWN = 1 days;
+    uint48 constant ADMIN_TRANSFER_DELAY = 2 days;
     bytes32 constant ADMIN_ROLE = 0x00;
     bytes32 constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
@@ -22,7 +26,7 @@ contract EscrowTest is Test {
         op = makeAddr("operator");
         subSolver = makeAddr("subSolver");
         subSolver2 = makeAddr("subSolver2");
-        escrow = new Escrow(admin, op, COOLDOWN);
+        escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN);
     }
 
     // --- Constructor ---
@@ -30,13 +34,18 @@ contract EscrowTest is Test {
     function test_constructor_sets_roles() public view {
         assertTrue(escrow.hasRole(ADMIN_ROLE, admin));
         assertTrue(escrow.hasRole(OPERATOR_ROLE, op));
-        assertEq(escrow.admin(), admin);
+        assertEq(escrow.defaultAdmin(), admin);
+        assertEq(escrow.defaultAdminDelay(), ADMIN_TRANSFER_DELAY);
         assertEq(escrow.cooldownPeriod(), COOLDOWN);
     }
 
     function test_constructor_reverts_zero_admin() public {
-        vm.expectRevert(Escrow.ZeroAddress.selector);
-        new Escrow(address(0), op, COOLDOWN);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControlDefaultAdminRules.AccessControlInvalidDefaultAdmin.selector, address(0)
+            )
+        );
+        new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, COOLDOWN);
     }
 
     // --- Deposit ---
@@ -322,11 +331,25 @@ contract EscrowTest is Test {
         escrow.debit(subSolver, 1 ether, keccak256("reason"));
     }
 
-    function test_grant_admin_role_to_new_address() public {
+    function test_begin_accept_admin_transfer() public {
         address newAdmin = makeAddr("newAdmin");
+
         vm.prank(admin);
-        escrow.grantRole(ADMIN_ROLE, newAdmin);
-        assertTrue(escrow.hasRole(ADMIN_ROLE, newAdmin));
+        escrow.beginDefaultAdminTransfer(newAdmin);
+
+        // Cannot accept before delay
+        vm.prank(newAdmin);
+        vm.expectRevert();
+        escrow.acceptDefaultAdminTransfer();
+
+        // Wait for delay + 1 second (schedule must be in the past)
+        vm.warp(block.timestamp + ADMIN_TRANSFER_DELAY + 1);
+
+        vm.prank(newAdmin);
+        escrow.acceptDefaultAdminTransfer();
+
+        assertEq(escrow.defaultAdmin(), newAdmin);
+        assertFalse(escrow.hasRole(ADMIN_ROLE, admin));
 
         // New admin can set cooldown
         vm.prank(newAdmin);
@@ -334,27 +357,31 @@ contract EscrowTest is Test {
         assertEq(escrow.cooldownPeriod(), 2 days);
     }
 
-    function test_renounce_admin_role() public {
+    function test_cancel_admin_transfer() public {
         address newAdmin = makeAddr("newAdmin");
-        vm.prank(admin);
-        escrow.grantRole(ADMIN_ROLE, newAdmin);
 
-        // Original admin renounces
         vm.prank(admin);
-        escrow.renounceRole(ADMIN_ROLE, admin);
-        assertFalse(escrow.hasRole(ADMIN_ROLE, admin));
+        escrow.beginDefaultAdminTransfer(newAdmin);
 
-        // Old admin can no longer act
         vm.prank(admin);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, admin, ADMIN_ROLE)
-        );
-        escrow.setCooldownPeriod(0);
+        escrow.cancelDefaultAdminTransfer();
 
-        // New admin can still act
+        // Even after delay, acceptance reverts because transfer was cancelled
+        vm.warp(block.timestamp + ADMIN_TRANSFER_DELAY + 1);
         vm.prank(newAdmin);
-        escrow.setCooldownPeriod(3 days);
-        assertEq(escrow.cooldownPeriod(), 3 days);
+        vm.expectRevert();
+        escrow.acceptDefaultAdminTransfer();
+
+        // Original admin still works
+        assertEq(escrow.defaultAdmin(), admin);
+    }
+
+    function test_begin_admin_transfer_reverts_non_admin() public {
+        vm.prank(subSolver);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, ADMIN_ROLE)
+        );
+        escrow.beginDefaultAdminTransfer(subSolver);
     }
 
     function test_admin_functions_revert_non_admin() public {
@@ -523,7 +550,7 @@ contract EscrowTest is Test {
 
     function test_withdraw_debits_reverts_if_admin_rejects_eth() public {
         RejectETH rejector = new RejectETH();
-        Escrow escrowBadAdmin = new Escrow(address(rejector), op, COOLDOWN);
+        Escrow escrowBadAdmin = new Escrow(ADMIN_TRANSFER_DELAY, address(rejector), op, COOLDOWN);
         escrowBadAdmin.deposit{value: 10 ether}(subSolver);
 
         vm.prank(op);
@@ -689,7 +716,7 @@ contract EscrowTest is Test {
         escrow.debit(subSolver, 4 ether, keccak256("penalty"));
 
         vm.expectEmit(true, false, false, true);
-        emit Escrow.DebitsWithdrawn(admin, 4 ether);
+        emit Escrow.DebitsWithdrawn(escrow.defaultAdmin(), 4 ether);
         escrow.withdrawDebits();
     }
 

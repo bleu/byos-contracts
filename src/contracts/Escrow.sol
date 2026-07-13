@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {
+    AccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 
 /// @title BYOS Escrow
 /// @author CoW Protocol Developers
 /// @notice Per-chain, native-token escrow holding sub-solver collateral keyed by sub-solver address.
 /// Anyone may deposit; the sub-solver withdraws subject to a cooldown.
 /// The operator holds exclusive debit authority for revert penalties (Track A)
-/// and EBBO passthrough (Track B). Debited funds are swept to the admin.
-contract Escrow is AccessControl {
+/// and EBBO passthrough (Track B). Debited funds are swept to the default admin.
+contract Escrow is AccessControlDefaultAdminRules {
     // --- Roles ---
 
     /// @notice Role identifier for the operator (automated BYOS service EOA).
@@ -24,8 +26,6 @@ contract Escrow is AccessControl {
     /// @notice Whether a sub-solver is frozen (blocks executeWithdrawal).
     mapping(address => bool) public frozen;
 
-    /// @notice Address that receives debited funds via withdrawDebits(). Set at construction to the admin.
-    address public admin;
     /// @notice Seconds a sub-solver must wait between requestWithdrawal and executeWithdrawal.
     uint256 public cooldownPeriod;
     /// @notice Debit pool not yet swept to the admin via withdrawDebits().
@@ -49,17 +49,15 @@ contract Escrow is AccessControl {
     error CooldownNotElapsed();
     error AccountFrozen();
     error WithdrawalAlreadyRequested();
-    error ZeroAddress();
     error NothingToWithdraw();
 
+    /// @param adminTransferDelay Seconds the default-admin transfer must wait before acceptance.
     /// @param _admin Secure wallet (e.g. multisig) that owns the contract. Granted DEFAULT_ADMIN_ROLE.
     /// @param operator EOA used by the BYOS service for automated debit/freeze operations. Granted OPERATOR_ROLE.
     /// @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal.
-    constructor(address _admin, address operator, uint256 _cooldownPeriod) {
-        if (_admin == address(0)) revert ZeroAddress();
-
-        admin = _admin;
-        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    constructor(uint48 adminTransferDelay, address _admin, address operator, uint256 _cooldownPeriod)
+        AccessControlDefaultAdminRules(adminTransferDelay, _admin)
+    {
         _grantRole(OPERATOR_ROLE, operator);
 
         cooldownPeriod = _cooldownPeriod;
@@ -150,12 +148,13 @@ contract Escrow is AccessControl {
         emit Deposited(subSolver, msg.value);
     }
 
-    /// @notice Sweep accumulated debits to the admin. Callable by anyone.
+    /// @notice Sweep accumulated debits to the default admin. Callable by anyone.
     function withdrawDebits() external {
         uint256 amount = accumulatedDebits;
         if (amount == 0) revert NothingToWithdraw();
         accumulatedDebits = 0;
 
+        address admin = defaultAdmin();
         // Send accumulated debits to admin
         (bool success,) = admin.call{value: amount}("");
         if (!success) revert TransferFailed();
