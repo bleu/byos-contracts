@@ -17,7 +17,7 @@ contract TrampolineFactory is EIP712 {
     event TrampolineDeployed(address indexed subSolver, address instance);
 
     /// @param _settlement GPv2Settlement address for this chain.
-    constructor(address _settlement) EIP712("BYOS", "1") {
+    constructor(address _settlement) EIP712("BYOS", "0.1") {
         settlement = _settlement;
     }
 

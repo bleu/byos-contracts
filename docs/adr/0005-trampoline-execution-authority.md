@@ -79,7 +79,7 @@ deposits separately per address. Delegation is a v2 concern.
 ```solidity
 Eip712Domain {
     name: "BYOS",
-    version: "1",
+    version: "0.1",
     chainId: <chain_id>,
     verifyingContract: <trampoline_factory_address>
 }
