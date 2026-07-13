@@ -10,7 +10,10 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 /// Settle-back sends native ETH instead of ERC-20.
 address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-/// @dev EIP-712 type hash of the signed proposal struct (ADR-0005).
+/// @dev EIP-712 type hash of the signed proposal struct. The type name "ProposalData"
+/// and its six fields are fixed by ADR-0005 and baked into every sub-solver signature —
+/// renaming the Solidity struct (`Proposal`, which omits the derived interactionsHash
+/// field) is safe, but changing this string invalidates all outstanding signatures.
 bytes32 constant PROPOSAL_TYPEHASH = keccak256(
     "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
 );
