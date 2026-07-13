@@ -10,6 +10,7 @@ This repo contains the Solidity contracts for BYOS (Bring Your Own Solver), a Co
 
 ```
 CONTEXT.md        Domain language and architecture map — read first
+src/interfaces/   Contract interfaces (events, errors, structs, full natspec)
 src/contracts/    Solidity source contracts
 test/             Forge tests (one directory per contract)
 script/           Deployment scripts
@@ -33,8 +34,32 @@ docs/agents/      Agent workflow conventions (issue tracker, triage labels)
 - **Foundry** is the build/test framework. Use `forge build`, `forge test`, `forge fmt`.
 - **Solidity 0.8.28+**, optimizer enabled with 1M runs, `cancun` EVM target.
 - `deny = "warnings"` is set in `foundry.toml` — compiler and lint warnings are errors.
-- `forge fmt` enforces import sorting (`sort_imports = true`).
+- `forge fmt` enforces the style in `foundry.toml`: 2-space indent, 120-column lines,
+  single quotes, sorted imports.
 - The `block-timestamp` lint is excluded (cooldown requires `block.timestamp` comparisons).
+
+## Solidity style
+
+Rationale and full conventions in
+[ADR-0006](docs/adr/0006-solidity-style-and-natspec.md). Summary:
+
+- Interfaces are separated from contracts. Every contract in `src/contracts/` has an
+  interface in `src/interfaces/` that declares its events, errors, structs, and external
+  functions with full natspec. Implementations carry `/// @inheritdoc` instead of
+  repeating docs.
+- Errors are prefixed with the contract name in CapWords: `Escrow_OnlyOwner`,
+  `Escrow_TransferFailed`. Events are named in the past tense and emitted on every
+  state change.
+- Constants and immutables use `UPPER_SNAKE_CASE` (including their public getters).
+  Function parameters, named return values, and local variables use `_camelCase` with a
+  leading underscore; so do private/internal state variables and functions.
+- Imports are always named (`import {X} from '...'`) and use remappings
+  (`interfaces/`, `contracts/`) rather than relative paths, grouped in order: external
+  libraries, local interfaces, local contracts.
+- Mappings declare named key/value parameters:
+  `mapping(address _subSolver => uint256 _balance)`.
+- solhint configs live at the repo root and in `script/`/`test/` (test config relaxes
+  naming/assembly rules).
 
 ## Domain language
 

@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {Escrow} from "../src/contracts/Escrow.sol";
-import {Script, console} from "forge-std/Script.sol";
+import {Script, console} from 'forge-std/Script.sol';
+
+import {Escrow} from 'contracts/Escrow.sol';
 
 contract Deploy is Script {
-    function run() public {
-        address escrowOwner = vm.envAddress("ESCROW_OWNER");
-        address escrowOperator = vm.envAddress("ESCROW_OPERATOR");
-        uint256 cooldownPeriod = vm.envOr("COOLDOWN_PERIOD", uint256(1 days));
+  function run() public {
+    address _escrowOwner = vm.envAddress('ESCROW_OWNER');
+    address _escrowOperator = vm.envAddress('ESCROW_OPERATOR');
+    uint256 _cooldownPeriod = vm.envOr('COOLDOWN_PERIOD', uint256(1 days));
 
-        vm.startBroadcast();
+    vm.startBroadcast();
 
-        Escrow escrow = new Escrow(escrowOwner, escrowOperator, cooldownPeriod);
-        console.log("Escrow deployed at:", address(escrow));
+    Escrow _escrow = new Escrow(_escrowOwner, _escrowOperator, _cooldownPeriod);
+    console.log('Escrow deployed at:', address(_escrow));
 
-        vm.stopBroadcast();
-    }
+    vm.stopBroadcast();
+  }
 }
