@@ -5,8 +5,9 @@ Status: accepted
 ## Context
 
 The **Trampoline** is the contract that receives `sellAmount`, runs a sub-solver's
-arbitrary interactions, and returns `buyAmount` to `GPv2Settlement` (CONTEXT.md;
-RFP §High-Level Design). The RFP flags two topologies and leaves the call to the
+arbitrary interactions, and returns `buyAmount` to `GPv2Settlement`
+([CONTEXT.md](../../CONTEXT.md);
+[RFP §High-Level Design](https://forum.cow.fi/t/rfp-bring-your-own-solver-byos/3469)). The RFP flags two topologies and leaves the call to the
 Core-Team Reviewer and grantee in M1:
 
 - a single shared Trampoline with strict allowance hygiene, or
@@ -17,7 +18,8 @@ Core-Team Reviewer and grantee in M1:
 In `GPv2Settlement.settle`, every interaction executes as a bare `call` from the
 settlement contract. `msg.sender` is `GPv2Settlement`, which holds all buffers and can
 be made to grant any approval. The only target it hard-blocks is the vault relayer
-(`contracts/src/contracts/GPv2Settlement.sol:446-465`; `GPv2Interaction.execute`). A
+([`GPv2Settlement.sol#L446-L465`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2Settlement.sol#L446-L465);
+`GPv2Interaction.execute`). A
 permissionless sub-solver's code must never run in that context, or it would inherit
 buffer-spend and arbitrary-approve power over a contract shared by every CoW solver.
 The Trampoline re-runs the sub-solver's interactions as itself, in a fund-less context.
@@ -28,8 +30,10 @@ That holds for both topologies, so topology is not what buys buffer safety.
 CoW's settlement contract does almost nothing to stop a solver from draining buffers or
 planting approvals; the only hard guard is the vault-relayer block. Its protection is
 social and economic. `settle` is `onlySolver`, gated by a manager-curated allowlist
-(`authenticator.isSolver`, `GPv2Settlement.sol:87-89`; `addSolver`/`removeSolver` are
-`onlyManager`, `GPv2AllowListAuthentication.sol:86,97`); vouched solvers post a bond;
+(`authenticator.isSolver`,
+[`GPv2Settlement.sol#L87-L89`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2Settlement.sol#L87-L89);
+`addSolver`/`removeSolver` are `onlyManager`,
+[`GPv2AllowListAuthentication.sol#L86-L97`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2AllowListAuthentication.sol#L86-L97)); vouched solvers post a bond;
 and a circuit breaker slashes or jails misbehavior. CoW trusts a permissioned, bonded
 set and punishes them, rather than constraining interactions in-contract.
 
@@ -66,7 +70,7 @@ Instances live at a deterministic CREATE2 address keyed by the sub-solver addres
 (recovered from the proposal's EIP-712 signature), counterfactual, with no registry and
 no governance step: the address is computed, not tracked. Deployment timing (at
 escrow-deposit time, paid by the sub-solver) is settled in
-[ADR-0006](0006-trampoline-deployment-settlement-integration.md).
+[ADR-0003](0003-trampoline-deployment-settlement-integration.md).
 
 ### Allowance hygiene and desired execution
 
@@ -93,7 +97,8 @@ required.
 Defense in depth pairs this containment with a cheap preventive layer. BYOS authors the
 approvals itself: exact `sellAmount`, route-derived, granted only to the venues the
 route uses (mirroring how the CoW driver separates declared allowances from solver swap
-calls in `services/crates/driver/src/domain/competition/solution/encoding.rs`), and
+calls in
+[`crates/driver/src/domain/competition/solution/encoding.rs`](https://github.com/cowprotocol/services/blob/main/crates/driver/src/domain/competition/solution/encoding.rs)), and
 rejects obvious sub-solver-authored `approve`-like calls. This kills the common
 planted-approval case at the source and reduces reliance on isolation without replacing
 it: "approve-like" is not one selector (`approve`, `increaseAllowance`, EIP-2612 / DAI
@@ -146,7 +151,8 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
 
 ## Consequences
 
-- On-chain attribution (issue 03): a distinct CREATE2 address per sub-solver means the
+- On-chain attribution ([ADR-0004](0004-penalty-schedule-and-attribution.md)): a
+  distinct CREATE2 address per sub-solver means the
   settlement calldata proves which sub-solver's route ran. With the working "one
   sub-solver per settlement tx" decision, the per-instance call is itself the
   attribution, which gives a self-evidencing Track-A escrow debit with no reliance on
@@ -157,6 +163,11 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
   deterministic addressing.
 
 ### Flagged downstream decisions (coupled, not settled here)
+
+Since acceptance, the first two forks were settled by
+[ADR-0005](0005-trampoline-execution-authority.md): execution is signature-gated and the
+payload is raw interactions. The upgrade-key posture remains open. The original flags
+are preserved below.
 
 - Execution authority: signature-gated versus BYOS-unilateral. The recommendation is
   signature-gated, so the reverted tx self-evidences exactly what the sub-solver

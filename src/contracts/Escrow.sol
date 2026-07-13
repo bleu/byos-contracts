@@ -188,6 +188,8 @@ contract Escrow {
     /// @notice Deposit native token into a sub-solver's escrow balance.
     /// @param subSolver The sub-solver address to credit.
     function deposit(address subSolver) external payable {
+        // TODO: deploy the sub-solver's Trampoline instance via the factory on first
+        // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
         balances[subSolver] += msg.value;
         emit Deposited(subSolver, msg.value);
     }

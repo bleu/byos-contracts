@@ -9,11 +9,24 @@ This repo contains the Solidity contracts for BYOS (Bring Your Own Solver), a Co
 ## Repo structure
 
 ```
+CONTEXT.md        Domain language and architecture map — read first
 src/contracts/    Solidity source contracts
 test/             Forge tests (one directory per contract)
 script/           Deployment scripts
 docs/adr/         Architecture decision records
+docs/reference/   CoW protocol background (slashing, auctions, CIPs)
+docs/agents/      Agent workflow conventions (issue tracker, triage labels)
 ```
+
+## Before working
+
+- Read [`CONTEXT.md`](CONTEXT.md), then the ADRs in [`docs/adr/`](docs/adr/) that touch
+  the area you're about to work in.
+- If your output contradicts an existing ADR, surface it explicitly rather than silently
+  overriding: _"Contradicts ADR-0002 (all-or-nothing withdrawal) — but worth reopening
+  because…"_
+- Issues and PRDs live as local markdown under `.scratch/` — see
+  [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
 
 ## Key conventions
 
@@ -25,15 +38,11 @@ docs/adr/         Architecture decision records
 
 ## Domain language
 
-Use the vocabulary from the ADRs and BYOS project context:
-
-- **Sub-solver** — external party that submits signed routing proposals to BYOS. Never holds submission keys.
-- **Owner** — secure wallet (multisig) that owns the Escrow, receives debited funds, configures parameters.
-- **Operator** — EOA in the BYOS service for automated debit/freeze operations. Cannot withdraw funds.
-- **Track A** — routine debit for gas + revert penalty when a settlement reverts on-chain.
-- **Track B** — rare passthrough of a CoW EBBO/fairness penalty to the responsible sub-solver.
-- **Cooldown** — waiting period between requesting and executing a withdrawal.
-- **Freeze** — operator blocks withdrawal execution during Track B investigations; does not affect effective balance.
+The glossary lives in [`CONTEXT.md`](CONTEXT.md) — sub-solver, proposal, Trampoline,
+Escrow, owner/operator, Track A/B, cooldown, freeze, attribution, `c_l`. Use those terms
+exactly in issue titles, test names, and code; don't drift to synonyms. If a concept you
+need isn't in the glossary, that's a signal — either you're inventing language the
+project doesn't use (reconsider) or there's a real gap (flag it).
 
 ## Testing guidelines
 
