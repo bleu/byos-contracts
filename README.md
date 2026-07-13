@@ -41,11 +41,14 @@ forge build
 forge test
 ```
 
-The fork suite (`test/fork/`) drives a real `GPv2Settlement.settle()` on mainnet state
-and needs an RPC endpoint; it skips cleanly when the variable is unset:
+The fork suite (`test/fork/`) drives a real `GPv2Settlement.settle()` on mainnet state.
+It uses a public RPC endpoint by default; set `MAINNET_RPC_URL` to use your own, or set
+it to an empty string to skip the suite (e.g. offline):
 
 ```bash
-MAINNET_RPC_URL=<url> forge test --match-path 'test/fork/*'
+forge test --match-path 'test/fork/*'          # public endpoint
+MAINNET_RPC_URL=<url> forge test               # custom endpoint
+MAINNET_RPC_URL= forge test                    # skip fork tests
 ```
 
 ### Deploy

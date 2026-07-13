@@ -15,7 +15,8 @@ import {Test} from "forge-std/Test.sol";
 
 /// @notice End-to-end integration against the real mainnet GPv2Settlement: a full
 /// settle() carrying the ADR-0003 value flow (transfer-in interaction + Trampoline
-/// execute). Requires MAINNET_RPC_URL; tests skip cleanly when it is unset.
+/// execute). Uses a public RPC endpoint by default; override with MAINNET_RPC_URL,
+/// or set it to an empty string to skip the suite (e.g. offline).
 contract ForkSettlementTest is Test {
     IGPv2Settlement constant SETTLEMENT = IGPv2Settlement(0x9008D19f58AAbD9eD0D60971565AA8510560ab41);
     IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -50,8 +51,10 @@ contract ForkSettlementTest is Test {
         _;
     }
 
+    string constant DEFAULT_RPC_URL = "https://ethereum-rpc.publicnode.com";
+
     function setUp() public {
-        rpcUrl = vm.envOr("MAINNET_RPC_URL", string(""));
+        rpcUrl = vm.envOr("MAINNET_RPC_URL", DEFAULT_RPC_URL);
         if (bytes(rpcUrl).length == 0) return;
         vm.createSelectFork(rpcUrl);
 
