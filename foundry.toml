@@ -2,6 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+remappings = ["@openzeppelin/=lib/openzeppelin-contracts/"]
 
 # Compiler settings
 via_ir = false

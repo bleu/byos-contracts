@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+
 /// @title BYOS Escrow
 /// @author CoW Protocol Developers
 /// @notice Per-chain, native-token escrow holding sub-solver collateral keyed by sub-solver address.
 /// Anyone may deposit; the sub-solver withdraws subject to a cooldown.
 /// The operator holds exclusive debit authority for revert penalties (Track A)
-/// and EBBO passthrough (Track B). Debited funds are swept to the owner.
-contract Escrow {
+/// and EBBO passthrough (Track B). Debited funds are swept to the admin.
+contract Escrow is AccessControl {
+    // --- Roles ---
+
+    /// @notice Role identifier for the operator (automated BYOS service EOA).
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+
     // --- State ---
 
     /// @notice Current balance of each sub-solver (increased by deposits, decreased by debits).
@@ -17,15 +24,11 @@ contract Escrow {
     /// @notice Whether a sub-solver is frozen (blocks executeWithdrawal).
     mapping(address => bool) public frozen;
 
-    /// @notice Contract owner — receives debited funds, can configure parameters.
-    address public owner;
-    /// @notice Address that must call acceptOwnership() to finalize a transfer.
-    address public pendingOwner;
-    /// @notice Automated EOA used by the BYOS service for debit/freeze operations.
-    address public operator;
+    /// @notice Address that receives debited funds via withdrawDebits(). Set at construction to the admin.
+    address public admin;
     /// @notice Seconds a sub-solver must wait between requestWithdrawal and executeWithdrawal.
     uint256 public cooldownPeriod;
-    /// @notice Debit pool not yet swept to the owner via withdrawDebits().
+    /// @notice Debit pool not yet swept to the admin via withdrawDebits().
     uint256 public accumulatedDebits;
 
     // --- Events ---
@@ -34,17 +37,12 @@ contract Escrow {
     event Withdrawn(address indexed subSolver, uint256 amount);
     event Frozen(address indexed subSolver);
     event Unfrozen(address indexed subSolver);
-    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
     event DebitsWithdrawn(address indexed to, uint256 amount);
     event WithdrawalRequested(address indexed subSolver);
     event WithdrawalCancelled(address indexed subSolver);
     event CooldownPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
-    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     // --- Errors ---
-    error OnlyOwner();
-    error OnlyOperator();
     error InsufficientBalance();
     error TransferFailed();
     error NoWithdrawalRequested();
@@ -53,68 +51,27 @@ contract Escrow {
     error WithdrawalAlreadyRequested();
     error ZeroAddress();
     error NothingToWithdraw();
-    error OnlyPendingOwner();
 
-    // --- Modifiers ---
-    modifier onlyOwner() {
-        _onlyOwner();
-        _;
-    }
-
-    modifier onlyOperator() {
-        _onlyOperator();
-        _;
-    }
-
-    function _onlyOwner() internal view {
-        if (msg.sender != owner) revert OnlyOwner();
-    }
-
-    function _onlyOperator() internal view {
-        if (msg.sender != operator) revert OnlyOperator();
-    }
-
-    /// @param _owner Secure wallet (e.g. multisig) that owns the contract. Receives debited funds.
-    /// @param _operator EOA used by the BYOS service for automated debit/freeze operations.
+    /// @param _admin Secure wallet (e.g. multisig) that owns the contract. Granted DEFAULT_ADMIN_ROLE.
+    /// @param operator EOA used by the BYOS service for automated debit/freeze operations. Granted OPERATOR_ROLE.
     /// @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal.
-    constructor(address _owner, address _operator, uint256 _cooldownPeriod) {
-        if (_owner == address(0)) revert ZeroAddress();
-        owner = _owner;
-        operator = _operator;
+    constructor(address _admin, address operator, uint256 _cooldownPeriod) {
+        if (_admin == address(0)) revert ZeroAddress();
+
+        admin = _admin;
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(OPERATOR_ROLE, operator);
+
         cooldownPeriod = _cooldownPeriod;
     }
 
-    // --- Owner-only ---
-
-    /// @notice Replace the operator address.
-    function setOperator(address newOperator) external onlyOwner {
-        address oldOperator = operator;
-        operator = newOperator;
-        emit OperatorUpdated(oldOperator, newOperator);
-    }
+    // --- Admin-only ---
 
     /// @notice Update the withdrawal cooldown period.
-    function setCooldownPeriod(uint256 period) external onlyOwner {
+    function setCooldownPeriod(uint256 period) external onlyRole(DEFAULT_ADMIN_ROLE) {
         uint256 oldPeriod = cooldownPeriod;
         cooldownPeriod = period;
         emit CooldownPeriodUpdated(oldPeriod, period);
-    }
-
-    /// @notice Start a two-step ownership transfer. The new owner must call acceptOwnership().
-    /// Calling again overrides any pending transfer.
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert ZeroAddress();
-        pendingOwner = newOwner;
-        emit OwnershipTransferStarted(owner, newOwner);
-    }
-
-    /// @notice Accept a pending ownership transfer. Only callable by the pending owner.
-    function acceptOwnership() external {
-        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
-        address oldOwner = owner;
-        owner = msg.sender;
-        pendingOwner = address(0);
-        emit OwnershipTransferred(oldOwner, msg.sender);
     }
 
     // --- Operator-only ---
@@ -123,22 +80,22 @@ contract Escrow {
     /// @param subSolver The sub-solver whose balance to debit.
     /// @param amount The amount to debit in native token.
     /// @param reason An identifier for the debit (e.g. tx hash for Track A, claim ID for Track B).
-    function debit(address subSolver, uint256 amount, bytes32 reason) external onlyOperator {
+    function debit(address subSolver, uint256 amount, bytes32 reason) external onlyRole(OPERATOR_ROLE) {
         if (amount > balances[subSolver]) revert InsufficientBalance();
         balances[subSolver] -= amount;
-        // Track debits for later sweep to owner
+        // Track debits for later sweep to admin
         accumulatedDebits += amount;
         emit Debited(subSolver, amount, reason);
     }
 
     /// @notice Freeze a sub-solver, blocking withdrawal execution. Used during Track B investigations.
-    function freeze(address subSolver) external onlyOperator {
+    function freeze(address subSolver) external onlyRole(OPERATOR_ROLE) {
         frozen[subSolver] = true;
         emit Frozen(subSolver);
     }
 
     /// @notice Unfreeze a sub-solver, allowing pending withdrawals to proceed.
-    function unfreeze(address subSolver) external onlyOperator {
+    function unfreeze(address subSolver) external onlyRole(OPERATOR_ROLE) {
         frozen[subSolver] = false;
         emit Unfrozen(subSolver);
     }
@@ -193,17 +150,17 @@ contract Escrow {
         emit Deposited(subSolver, msg.value);
     }
 
-    /// @notice Sweep accumulated debits to the owner. Callable by anyone.
+    /// @notice Sweep accumulated debits to the admin. Callable by anyone.
     function withdrawDebits() external {
         uint256 amount = accumulatedDebits;
         if (amount == 0) revert NothingToWithdraw();
         accumulatedDebits = 0;
 
-        // Send accumulated debits to owner
-        (bool success,) = owner.call{value: amount}("");
+        // Send accumulated debits to admin
+        (bool success,) = admin.call{value: amount}("");
         if (!success) revert TransferFailed();
 
-        emit DebitsWithdrawn(owner, amount);
+        emit DebitsWithdrawn(admin, amount);
     }
 
     // --- Views ---
@@ -220,7 +177,7 @@ contract Escrow {
         return balances[subSolver];
     }
 
-    /// @notice Amount of accumulated debits available for owner withdrawal.
+    /// @notice Amount of accumulated debits available for admin withdrawal.
     function withdrawableBalance() external view returns (uint256) {
         return accumulatedDebits;
     }

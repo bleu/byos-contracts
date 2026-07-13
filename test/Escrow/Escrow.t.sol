@@ -1,35 +1,40 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+
 import {Escrow} from "../../src/contracts/Escrow.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract EscrowTest is Test {
     Escrow escrow;
-    address owner;
+    address admin;
     address op;
     address subSolver;
     address subSolver2;
 
     uint256 constant COOLDOWN = 1 days;
+    bytes32 constant ADMIN_ROLE = 0x00;
+    bytes32 constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     function setUp() public {
-        owner = makeAddr("owner");
+        admin = makeAddr("admin");
         op = makeAddr("operator");
         subSolver = makeAddr("subSolver");
         subSolver2 = makeAddr("subSolver2");
-        escrow = new Escrow(owner, op, COOLDOWN);
+        escrow = new Escrow(admin, op, COOLDOWN);
     }
 
     // --- Constructor ---
 
     function test_constructor_sets_roles() public view {
-        assertEq(escrow.owner(), owner);
-        assertEq(escrow.operator(), op);
+        assertTrue(escrow.hasRole(ADMIN_ROLE, admin));
+        assertTrue(escrow.hasRole(OPERATOR_ROLE, op));
+        assertEq(escrow.admin(), admin);
         assertEq(escrow.cooldownPeriod(), COOLDOWN);
     }
 
-    function test_constructor_reverts_zero_owner() public {
+    function test_constructor_reverts_zero_admin() public {
         vm.expectRevert(Escrow.ZeroAddress.selector);
         new Escrow(address(0), op, COOLDOWN);
     }
@@ -68,7 +73,9 @@ contract EscrowTest is Test {
     function test_debit_reverts_non_operator() public {
         escrow.deposit{value: 10 ether}(subSolver);
         vm.prank(subSolver);
-        vm.expectRevert(Escrow.OnlyOperator.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, OPERATOR_ROLE)
+        );
         escrow.debit(subSolver, 1 ether, keccak256("reason"));
     }
 
@@ -247,19 +254,21 @@ contract EscrowTest is Test {
 
     function test_freeze_reverts_non_operator() public {
         vm.prank(subSolver);
-        vm.expectRevert(Escrow.OnlyOperator.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, OPERATOR_ROLE)
+        );
         escrow.freeze(subSolver);
     }
 
     // --- withdrawDebits ---
 
-    function test_withdraw_debits_sends_to_owner() public {
+    function test_withdraw_debits_sends_to_admin() public {
         escrow.deposit{value: 10 ether}(subSolver);
         vm.prank(op);
         escrow.debit(subSolver, 4 ether, keccak256("penalty"));
 
         escrow.withdrawDebits();
-        assertEq(owner.balance, 4 ether);
+        assertEq(admin.balance, 4 ether);
         assertEq(escrow.withdrawableBalance(), 0);
     }
 
@@ -275,89 +284,93 @@ contract EscrowTest is Test {
 
         vm.prank(subSolver2);
         escrow.withdrawDebits();
-        assertEq(owner.balance, 2 ether);
+        assertEq(admin.balance, 2 ether);
     }
 
-    // --- Owner functions ---
-
-    function test_set_operator() public {
-        address newOp = makeAddr("newOp");
-        vm.prank(owner);
-        escrow.setOperator(newOp);
-        assertEq(escrow.operator(), newOp);
-    }
+    // --- Admin functions ---
 
     function test_set_cooldown_period() public {
-        vm.prank(owner);
+        vm.prank(admin);
         escrow.setCooldownPeriod(7 days);
         assertEq(escrow.cooldownPeriod(), 7 days);
     }
 
-    function test_transfer_ownership_two_step() public {
-        address newOwner = makeAddr("newOwner");
+    function test_grant_operator_role() public {
+        address newOp = makeAddr("newOp");
+        vm.prank(admin);
+        escrow.grantRole(OPERATOR_ROLE, newOp);
+        assertTrue(escrow.hasRole(OPERATOR_ROLE, newOp));
 
-        // Step 1: initiate transfer — owner does not change yet
-        vm.prank(owner);
-        escrow.transferOwnership(newOwner);
-        assertEq(escrow.owner(), owner);
-        assertEq(escrow.pendingOwner(), newOwner);
-
-        // Step 2: new owner accepts
-        vm.prank(newOwner);
-        escrow.acceptOwnership();
-        assertEq(escrow.owner(), newOwner);
-        assertEq(escrow.pendingOwner(), address(0));
+        // New operator can debit
+        escrow.deposit{value: 5 ether}(subSolver);
+        vm.prank(newOp);
+        escrow.debit(subSolver, 1 ether, keccak256("test"));
+        assertEq(escrow.balance(subSolver), 4 ether);
     }
 
-    function test_transfer_ownership_second_call_overrides_first() public {
-        address firstCandidate = makeAddr("first");
-        address secondCandidate = makeAddr("second");
+    function test_revoke_operator_role() public {
+        vm.prank(admin);
+        escrow.revokeRole(OPERATOR_ROLE, op);
+        assertFalse(escrow.hasRole(OPERATOR_ROLE, op));
 
-        vm.prank(owner);
-        escrow.transferOwnership(firstCandidate);
-        assertEq(escrow.pendingOwner(), firstCandidate);
-
-        // Owner changes their mind
-        vm.prank(owner);
-        escrow.transferOwnership(secondCandidate);
-        assertEq(escrow.pendingOwner(), secondCandidate);
-
-        // First candidate cannot accept
-        vm.prank(firstCandidate);
-        vm.expectRevert(Escrow.OnlyPendingOwner.selector);
-        escrow.acceptOwnership();
-
-        // Second candidate can
-        vm.prank(secondCandidate);
-        escrow.acceptOwnership();
-        assertEq(escrow.owner(), secondCandidate);
+        // Old operator can no longer debit
+        escrow.deposit{value: 5 ether}(subSolver);
+        vm.prank(op);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, op, OPERATOR_ROLE)
+        );
+        escrow.debit(subSolver, 1 ether, keccak256("reason"));
     }
 
-    function test_accept_ownership_reverts_non_pending_owner() public {
-        address newOwner = makeAddr("newOwner");
-        vm.prank(owner);
-        escrow.transferOwnership(newOwner);
+    function test_grant_admin_role_to_new_address() public {
+        address newAdmin = makeAddr("newAdmin");
+        vm.prank(admin);
+        escrow.grantRole(ADMIN_ROLE, newAdmin);
+        assertTrue(escrow.hasRole(ADMIN_ROLE, newAdmin));
 
-        vm.prank(subSolver);
-        vm.expectRevert(Escrow.OnlyPendingOwner.selector);
-        escrow.acceptOwnership();
+        // New admin can set cooldown
+        vm.prank(newAdmin);
+        escrow.setCooldownPeriod(2 days);
+        assertEq(escrow.cooldownPeriod(), 2 days);
     }
 
-    function test_transfer_ownership_reverts_zero_address() public {
-        vm.prank(owner);
-        vm.expectRevert(Escrow.ZeroAddress.selector);
-        escrow.transferOwnership(address(0));
-    }
+    function test_renounce_admin_role() public {
+        address newAdmin = makeAddr("newAdmin");
+        vm.prank(admin);
+        escrow.grantRole(ADMIN_ROLE, newAdmin);
 
-    function test_owner_functions_revert_non_owner() public {
-        vm.startPrank(subSolver);
-        vm.expectRevert(Escrow.OnlyOwner.selector);
-        escrow.setOperator(subSolver);
-        vm.expectRevert(Escrow.OnlyOwner.selector);
+        // Original admin renounces
+        vm.prank(admin);
+        escrow.renounceRole(ADMIN_ROLE, admin);
+        assertFalse(escrow.hasRole(ADMIN_ROLE, admin));
+
+        // Old admin can no longer act
+        vm.prank(admin);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, admin, ADMIN_ROLE)
+        );
         escrow.setCooldownPeriod(0);
-        vm.expectRevert(Escrow.OnlyOwner.selector);
-        escrow.transferOwnership(subSolver);
-        vm.stopPrank();
+
+        // New admin can still act
+        vm.prank(newAdmin);
+        escrow.setCooldownPeriod(3 days);
+        assertEq(escrow.cooldownPeriod(), 3 days);
+    }
+
+    function test_admin_functions_revert_non_admin() public {
+        vm.prank(subSolver);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, ADMIN_ROLE)
+        );
+        escrow.setCooldownPeriod(0);
+    }
+
+    function test_non_admin_cannot_grant_roles() public {
+        vm.prank(subSolver);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, ADMIN_ROLE)
+        );
+        escrow.grantRole(OPERATOR_ROLE, subSolver);
     }
 
     // ==================== Edge case tests ====================
@@ -486,7 +499,9 @@ contract EscrowTest is Test {
         escrow.freeze(subSolver);
 
         vm.prank(subSolver);
-        vm.expectRevert(Escrow.OnlyOperator.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, OPERATOR_ROLE)
+        );
         escrow.unfreeze(subSolver);
     }
 
@@ -503,19 +518,19 @@ contract EscrowTest is Test {
 
         assertEq(escrow.withdrawableBalance(), 7 ether);
         escrow.withdrawDebits();
-        assertEq(owner.balance, 7 ether);
+        assertEq(admin.balance, 7 ether);
     }
 
-    function test_withdraw_debits_reverts_if_owner_rejects_eth() public {
+    function test_withdraw_debits_reverts_if_admin_rejects_eth() public {
         RejectETH rejector = new RejectETH();
-        Escrow escrowBadOwner = new Escrow(address(rejector), op, COOLDOWN);
-        escrowBadOwner.deposit{value: 10 ether}(subSolver);
+        Escrow escrowBadAdmin = new Escrow(address(rejector), op, COOLDOWN);
+        escrowBadAdmin.deposit{value: 10 ether}(subSolver);
 
         vm.prank(op);
-        escrowBadOwner.debit(subSolver, 5 ether, keccak256("reason"));
+        escrowBadAdmin.debit(subSolver, 5 ether, keccak256("reason"));
 
         vm.expectRevert(Escrow.TransferFailed.selector);
-        escrowBadOwner.withdrawDebits();
+        escrowBadAdmin.withdrawDebits();
     }
 
     // --- Reentrancy ---
@@ -542,22 +557,23 @@ contract EscrowTest is Test {
         assertEq(escrow.balance(subSolver), 20 ether);
     }
 
-    // --- Owner admin edge cases ---
+    // --- Admin edge cases ---
 
-    function test_set_operator_to_zero_bricks_operator_functions() public {
-        vm.prank(owner);
-        escrow.setOperator(address(0));
-        assertEq(escrow.operator(), address(0));
+    function test_revoke_operator_bricks_operator_functions() public {
+        vm.prank(admin);
+        escrow.revokeRole(OPERATOR_ROLE, op);
 
         // Old operator can no longer debit
         escrow.deposit{value: 5 ether}(subSolver);
         vm.prank(op);
-        vm.expectRevert(Escrow.OnlyOperator.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, op, OPERATOR_ROLE)
+        );
         escrow.debit(subSolver, 1 ether, keccak256("reason"));
     }
 
     function test_set_cooldown_period_zero_allows_instant_withdrawal() public {
-        vm.prank(owner);
+        vm.prank(admin);
         escrow.setCooldownPeriod(0);
 
         escrow.deposit{value: 5 ether}(subSolver);
@@ -568,24 +584,6 @@ contract EscrowTest is Test {
         vm.prank(subSolver);
         escrow.executeWithdrawal();
         assertEq(subSolver.balance, 5 ether);
-    }
-
-    function test_old_owner_loses_access_after_transfer() public {
-        address newOwner = makeAddr("newOwner");
-        vm.prank(owner);
-        escrow.transferOwnership(newOwner);
-        vm.prank(newOwner);
-        escrow.acceptOwnership();
-
-        // Old owner can no longer act
-        vm.prank(owner);
-        vm.expectRevert(Escrow.OnlyOwner.selector);
-        escrow.setOperator(makeAddr("x"));
-
-        // New owner can act
-        vm.prank(newOwner);
-        escrow.setOperator(makeAddr("x"));
-        assertEq(escrow.operator(), makeAddr("x"));
     }
 
     function test_cooldown_reduction_makes_pending_withdrawal_executable() public {
@@ -599,14 +597,30 @@ contract EscrowTest is Test {
         vm.expectRevert(Escrow.CooldownNotElapsed.selector);
         escrow.executeWithdrawal();
 
-        // Owner shortens cooldown to 30 minutes
-        vm.prank(owner);
+        // Admin shortens cooldown to 30 minutes
+        vm.prank(admin);
         escrow.setCooldownPeriod(30 minutes);
 
         // Now the 1-hour wait exceeds the new 30-minute cooldown
         vm.prank(subSolver);
         escrow.executeWithdrawal();
         assertEq(subSolver.balance, 5 ether);
+    }
+
+    function test_multiple_operators_can_coexist() public {
+        address secondOp = makeAddr("secondOp");
+        vm.prank(admin);
+        escrow.grantRole(OPERATOR_ROLE, secondOp);
+
+        escrow.deposit{value: 10 ether}(subSolver);
+
+        // Both operators can debit
+        vm.prank(op);
+        escrow.debit(subSolver, 3 ether, keccak256("first-op"));
+        vm.prank(secondOp);
+        escrow.debit(subSolver, 2 ether, keccak256("second-op"));
+
+        assertEq(escrow.balance(subSolver), 5 ether);
     }
 
     // --- Event emissions ---
@@ -663,27 +677,10 @@ contract EscrowTest is Test {
     }
 
     function test_admin_functions_emit_events() public {
-        address newOp = makeAddr("newOp");
-        vm.prank(owner);
-        vm.expectEmit(true, true, false, false);
-        emit Escrow.OperatorUpdated(op, newOp);
-        escrow.setOperator(newOp);
-
-        vm.prank(owner);
+        vm.prank(admin);
         vm.expectEmit(false, false, false, true);
         emit Escrow.CooldownPeriodUpdated(COOLDOWN, 7 days);
         escrow.setCooldownPeriod(7 days);
-
-        address newOwner = makeAddr("newOwner");
-        vm.prank(owner);
-        vm.expectEmit(true, true, false, false);
-        emit Escrow.OwnershipTransferStarted(owner, newOwner);
-        escrow.transferOwnership(newOwner);
-
-        vm.prank(newOwner);
-        vm.expectEmit(true, true, false, false);
-        emit Escrow.OwnershipTransferred(owner, newOwner);
-        escrow.acceptOwnership();
     }
 
     function test_withdraw_debits_emits_event() public {
@@ -692,8 +689,22 @@ contract EscrowTest is Test {
         escrow.debit(subSolver, 4 ether, keccak256("penalty"));
 
         vm.expectEmit(true, false, false, true);
-        emit Escrow.DebitsWithdrawn(owner, 4 ether);
+        emit Escrow.DebitsWithdrawn(admin, 4 ether);
         escrow.withdrawDebits();
+    }
+
+    function test_role_grant_revoke_emits_events() public {
+        address newOp = makeAddr("newOp");
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, false);
+        emit IAccessControl.RoleGranted(OPERATOR_ROLE, newOp, admin);
+        escrow.grantRole(OPERATOR_ROLE, newOp);
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, false);
+        emit IAccessControl.RoleRevoked(OPERATOR_ROLE, newOp, admin);
+        escrow.revokeRole(OPERATOR_ROLE, newOp);
     }
 }
 
