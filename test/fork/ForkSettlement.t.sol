@@ -8,7 +8,7 @@ import {BUY_ETH_ADDRESS, Trampoline} from "../../src/contracts/Trampoline.sol";
 import {TrampolineFactory} from "../../src/contracts/TrampolineFactory.sol";
 import {IGPv2Authentication} from "../../src/interfaces/IGPv2Authentication.sol";
 import {GPv2TradeData, IGPv2Settlement} from "../../src/interfaces/IGPv2Settlement.sol";
-import {IUniswapV2Router} from "../../src/interfaces/IUniswapV2Router.sol";
+import {IUniswapV2Router} from "../interfaces/IUniswapV2Router.sol";
 import {IWETH} from "../../src/interfaces/IWETH.sol";
 import {ProposalSigning} from "../utils/ProposalSigning.sol";
 import {Test} from "forge-std/Test.sol";
