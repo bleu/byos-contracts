@@ -399,7 +399,7 @@ contract EscrowTest is Test {
 
     // --- Withdrawal edge cases ---
 
-    function test_execute_withdrawal_after_full_debit_during_cooldown() public {
+    function test_execute_withdrawal_reverts_after_full_debit_during_cooldown() public {
         escrow.deposit{value: 10 ether}(subSolver);
         vm.prank(subSolver);
         escrow.requestWithdrawal();
@@ -409,12 +409,8 @@ contract EscrowTest is Test {
 
         vm.warp(block.timestamp + COOLDOWN);
         vm.prank(subSolver);
+        vm.expectRevert(Escrow.NothingToWithdraw.selector);
         escrow.executeWithdrawal();
-
-        // Sub-solver gets nothing, state is fully cleared
-        assertEq(subSolver.balance, 0);
-        assertEq(escrow.balances(subSolver), 0);
-        assertEq(escrow.withdrawalRequestedAt(subSolver), 0);
     }
 
     function test_withdrawal_at_exact_cooldown_boundary() public {

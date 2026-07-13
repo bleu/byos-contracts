@@ -161,16 +161,15 @@ contract Escrow {
         if (block.timestamp < withdrawalRequestedAt[msg.sender] + cooldownPeriod) revert CooldownNotElapsed();
 
         uint256 amount = balances[msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
 
         // Reset sub-solver state before external call (CEI pattern)
         balances[msg.sender] = 0;
         withdrawalRequestedAt[msg.sender] = 0;
 
-        if (amount > 0) {
-            // Send remaining balance (deposits - debits) to the sub-solver
-            (bool success,) = msg.sender.call{value: amount}("");
-            if (!success) revert TransferFailed();
-        }
+        // Send remaining balance (deposits - debits) to the sub-solver
+        (bool success,) = msg.sender.call{value: amount}("");
+        if (!success) revert TransferFailed();
 
         emit Withdrawn(msg.sender, amount);
     }
