@@ -4,57 +4,14 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Escrow} from "../../src/contracts/Escrow.sol";
-import {Trampoline} from "../../src/contracts/Trampoline.sol";
+import {BUY_ETH_ADDRESS, Trampoline} from "../../src/contracts/Trampoline.sol";
 import {TrampolineFactory} from "../../src/contracts/TrampolineFactory.sol";
+import {IGPv2Authentication} from "../../src/interfaces/IGPv2Authentication.sol";
+import {GPv2TradeData, IGPv2Settlement} from "../../src/interfaces/IGPv2Settlement.sol";
+import {IUniswapV2Router} from "../../src/interfaces/IUniswapV2Router.sol";
+import {IWETH} from "../../src/interfaces/IWETH.sol";
+import {ProposalSigning} from "../utils/ProposalSigning.sol";
 import {Test} from "forge-std/Test.sol";
-
-/// @dev Mirrors GPv2Trade.Data.
-struct GPv2TradeData {
-    uint256 sellTokenIndex;
-    uint256 buyTokenIndex;
-    address receiver;
-    uint256 sellAmount;
-    uint256 buyAmount;
-    uint32 validTo;
-    bytes32 appData;
-    uint256 feeAmount;
-    uint256 flags;
-    uint256 executedAmount;
-    bytes signature;
-}
-
-interface IGPv2Settlement {
-    function settle(
-        address[] calldata tokens,
-        uint256[] calldata clearingPrices,
-        GPv2TradeData[] calldata trades,
-        Trampoline.Interaction[][3] calldata interactions
-    ) external;
-    function domainSeparator() external view returns (bytes32);
-    function vaultRelayer() external view returns (address);
-    function authenticator() external view returns (address);
-}
-
-interface IGPv2Authentication {
-    function manager() external view returns (address);
-    function addSolver(address solver) external;
-}
-
-interface IUniswapV2Router {
-    function getAmountsOut(uint256 amountIn, address[] calldata path) external view returns (uint256[] memory);
-    function swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory);
-}
-
-interface IWETH is IERC20 {
-    function deposit() external payable;
-    function withdraw(uint256 amount) external;
-}
 
 /// @notice End-to-end integration against the real mainnet GPv2Settlement: a full
 /// settle() carrying the ADR-0003 value flow (transfer-in interaction + Trampoline
@@ -64,17 +21,13 @@ contract ForkSettlementTest is Test {
     IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IERC20 constant USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
     IUniswapV2Router constant UNIV2_ROUTER = IUniswapV2Router(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
-    address constant BUY_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    address constant BUY_ETH = BUY_ETH_ADDRESS;
 
     bytes32 constant ORDER_TYPE_HASH = keccak256(
         "Order(address sellToken,address buyToken,address receiver,uint256 sellAmount,uint256 buyAmount,uint32 validTo,bytes32 appData,uint256 feeAmount,string kind,bool partiallyFillable,string sellTokenBalance,string buyTokenBalance)"
     );
     bytes32 constant KIND_SELL = keccak256("sell");
     bytes32 constant BALANCE_ERC20 = keccak256("erc20");
-
-    bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-        "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
-    );
 
     /// @dev A signed sub-solver proposal bundled with its route.
     struct SignedProposal {
@@ -169,18 +122,7 @@ contract ForkSettlementTest is Test {
             nonce: 0
         });
         signed.route = route;
-        bytes32 structHash = keccak256(
-            abi.encode(
-                PROPOSAL_TYPEHASH,
-                signed.data.orderUidHash,
-                signed.data.sellAmount,
-                signed.data.buyAmount,
-                keccak256(abi.encode(route)),
-                signed.data.validUntil,
-                signed.data.nonce
-            )
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", factory.domainSeparator(), structHash));
+        bytes32 digest = ProposalSigning.digest(factory.domainSeparator(), signed.data, route);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(subSolverKey, digest);
         signed.signature = abi.encodePacked(r, s, v);
     }

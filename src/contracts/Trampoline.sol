@@ -6,6 +6,15 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+/// @dev Marker address GPv2 uses for orders buying native ETH (GPv2Order.BUY_ETH_ADDRESS).
+/// Settle-back sends native ETH instead of ERC-20.
+address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+/// @dev EIP-712 type hash of the signed proposal struct (ADR-0005).
+bytes32 constant PROPOSAL_TYPEHASH = keccak256(
+    "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
+);
+
 /// @title BYOS Trampoline
 /// @author CoW Protocol Developers
 /// @notice Per-sub-solver execution sandbox. Receives the trade's sell tokens from
@@ -31,15 +40,6 @@ contract Trampoline {
         uint256 validUntil;
         uint256 nonce;
     }
-
-    /// @notice Marker address GPv2 uses for orders buying native ETH
-    /// (GPv2Order.BUY_ETH_ADDRESS). Settle-back sends native ETH instead of ERC-20.
-    address public constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-
-    /// @notice EIP-712 type hash of the signed proposal struct (ADR-0005).
-    bytes32 public constant PROPOSAL_TYPEHASH = keccak256(
-        "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
-    );
 
     /// @notice The sub-solver whose signed proposals this instance executes.
     address public immutable subSolver;

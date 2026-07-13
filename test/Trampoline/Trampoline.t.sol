@@ -3,12 +3,13 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {Trampoline} from "../../src/contracts/Trampoline.sol";
+import {BUY_ETH_ADDRESS, Trampoline} from "../../src/contracts/Trampoline.sol";
 import {TrampolineFactory} from "../../src/contracts/TrampolineFactory.sol";
 import {MockRouter} from "../mocks/MockRouter.sol";
 import {MockWETH} from "../mocks/MockWETH.sol";
 import {Reverter} from "../mocks/Reverter.sol";
 import {TestERC20} from "../mocks/TestERC20.sol";
+import {ProposalSigning} from "../utils/ProposalSigning.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract TrampolineTest is Test {
@@ -24,10 +25,6 @@ contract TrampolineTest is Test {
 
     uint256 constant SELL_AMOUNT = 100 ether;
     uint256 constant BUY_AMOUNT = 90 ether;
-
-    bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-        "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
-    );
 
     function setUp() public {
         settlement = makeAddr("settlement");
@@ -58,18 +55,7 @@ contract TrampolineTest is Test {
         view
         returns (bytes memory)
     {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                PROPOSAL_TYPEHASH,
-                proposal.orderUidHash,
-                proposal.sellAmount,
-                proposal.buyAmount,
-                keccak256(abi.encode(interactions)),
-                proposal.validUntil,
-                proposal.nonce
-            )
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", factory.domainSeparator(), structHash));
+        bytes32 digest = ProposalSigning.digest(factory.domainSeparator(), proposal, interactions);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
     }
@@ -235,9 +221,8 @@ contract TrampolineTest is Test {
         Trampoline.Proposal memory proposal = _proposal();
         bytes memory signature = _sign(subSolverKey, proposal, route);
 
-        address buyEth = trampoline.BUY_ETH_ADDRESS();
         vm.prank(settlement);
-        trampoline.execute(proposal, route, buyEth, signature);
+        trampoline.execute(proposal, route, BUY_ETH_ADDRESS, signature);
 
         assertEq(settlement.balance, BUY_AMOUNT);
         assertEq(address(trampoline).balance, 0);
