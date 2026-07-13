@@ -6,17 +6,18 @@ Status: accepted
 
 The **Escrow** is a per-chain, native-token contract holding sub-solver collateral keyed by sub-solver address. Anyone may deposit; the sub-solver withdraws subject to a cooldown; BYOS holds an exclusive **debit** function for revert penalties/gas (Track A) and EBBO passthrough (Track B). It is the *only* sub-solver capital BYOS touches — trade capital flows atomically through `GPv2Settlement → Trampoline` (see [ADR-0001](0001-trampoline-topology.md)). Must be chain-agnostic from day one (v1: Ethereum mainnet + Gnosis).
 
-This ADR settles three coupled sub-decisions from the [economics design note](../design/byos-subsolver-economics.md):
+This ADR settles three coupled sub-decisions from the early economics design
+exploration:
 
-- **Q2** — Authorization model (blanket vs per-proposal signature-gated)
-- **Q5** — Withdrawal & freeze semantics
-- **Q6/Q7** — FX / reserve policy for Track B claims
+- Authorization model (blanket vs per-proposal signature-gated)
+- Withdrawal & freeze semantics
+- FX / reserve policy for Track B claims
 
 Plus additional decisions on role separation, interface design, and deployment strategy.
 
 ## Decision
 
-### Authorization model (Q2): blanket authority
+### Authorization model: blanket authority
 
 **Option A — blanket.** Depositing grants BYOS standing debit authority up to the sub-solver's balance. Simpler, lower gas, easier to develop and maintain. Matches the RFP's "exclusive debit function."
 
@@ -31,7 +32,7 @@ Two distinct roles with separated concerns:
 
 **Why separate?** The operator's private key is more exposed (lives in the BYOS service). If compromised, the attacker can debit sub-solver balances — but those funds go to the owner, not the attacker. The owner (cold wallet) can replace a compromised operator immediately. This limits the blast radius of a key compromise to griefing (illegitimate debits), not theft.
 
-### Withdrawal semantics (Q5): all-or-nothing with cooldown
+### Withdrawal semantics: all-or-nothing with cooldown
 
 - **`requestWithdrawal()`** — sub-solver signals intent to withdraw their entire balance. Effective balance drops to 0 immediately (sub-solver is offline for new proposals). Cooldown clock starts.
 - **`executeWithdrawal()`** — after cooldown expires, sub-solver withdraws their full remaining balance. No partial withdrawals.
@@ -39,7 +40,7 @@ Two distinct roles with separated concerns:
 
 All-or-nothing eliminates partial withdrawal edge cases and balance fragmentation. A sub-solver who wants to reduce their position does a full cycle (withdraw → re-deposit).
 
-### Freeze semantics (Q5): withdrawal blocker only
+### Freeze semantics: withdrawal blocker only
 
 - **`freeze(address)`** — operator-only. Sets a boolean flag that blocks `executeWithdrawal()`. Does **not** affect on-chain effective balance.
 - **`unfreeze(address)`** — operator-only. Clears the flag.
@@ -47,7 +48,7 @@ All-or-nothing eliminates partial withdrawal edge cases and balance fragmentatio
 
 Freeze is a blunt withdrawal gate for when a Track B investigation is open. No on-chain freeze timeout or dispute mechanism — handled off-chain. The owner can replace an unresponsive operator.
 
-### FX / reserve policy (Q6/Q7): off-chain
+### FX / reserve policy: off-chain
 
 No on-chain reserve multiplier or frozen-amount tracking. The contract is a dumb ledger; the BYOS service is the brain.
 
