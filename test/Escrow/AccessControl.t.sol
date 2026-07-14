@@ -26,7 +26,7 @@ contract AccessControlTest is EscrowTestBase {
     vm.expectRevert(
       abi.encodeWithSelector(IAccessControlDefaultAdminRules.AccessControlInvalidDefaultAdmin.selector, address(0))
     );
-    new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, COOLDOWN);
+    new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, COOLDOWN, 'BYOS Escrow', 'BYOS');
   }
 
   // --- Admin functions ---
@@ -43,11 +43,10 @@ contract AccessControlTest is EscrowTestBase {
     escrow.grantRole(OPERATOR_ROLE, newOp);
     assertTrue(escrow.hasRole(OPERATOR_ROLE, newOp));
 
-    // New operator can debit
     escrow.deposit{value: 5 ether}(subSolver);
     vm.prank(newOp);
     escrow.debit(subSolver, 1 ether, keccak256('test'));
-    assertEq(escrow.balance(subSolver), 4 ether);
+    assertEq(escrow.balanceOf(subSolver), 4 ether);
   }
 
   function test_revoke_operator_role() public {
@@ -55,7 +54,6 @@ contract AccessControlTest is EscrowTestBase {
     escrow.revokeRole(OPERATOR_ROLE, op);
     assertFalse(escrow.hasRole(OPERATOR_ROLE, op));
 
-    // Old operator can no longer debit
     escrow.deposit{value: 5 ether}(subSolver);
     vm.prank(op);
     vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, op, OPERATOR_ROLE));
@@ -68,12 +66,10 @@ contract AccessControlTest is EscrowTestBase {
     vm.prank(admin);
     escrow.beginDefaultAdminTransfer(newAdmin);
 
-    // Cannot accept before delay
     vm.prank(newAdmin);
     vm.expectRevert();
     escrow.acceptDefaultAdminTransfer();
 
-    // Wait for delay + 1 second (schedule must be in the past)
     vm.warp(block.timestamp + ADMIN_TRANSFER_DELAY + 1);
 
     vm.prank(newAdmin);
@@ -82,7 +78,6 @@ contract AccessControlTest is EscrowTestBase {
     assertEq(escrow.defaultAdmin(), newAdmin);
     assertFalse(escrow.hasRole(ADMIN_ROLE, admin));
 
-    // New admin can set cooldown
     vm.prank(newAdmin);
     escrow.setCooldownPeriod(2 days);
     assertEq(escrow.cooldownPeriod(), 2 days);
@@ -97,13 +92,11 @@ contract AccessControlTest is EscrowTestBase {
     vm.prank(admin);
     escrow.cancelDefaultAdminTransfer();
 
-    // Even after delay, acceptance reverts because transfer was cancelled
     vm.warp(block.timestamp + ADMIN_TRANSFER_DELAY + 1);
     vm.prank(newAdmin);
     vm.expectRevert();
     escrow.acceptDefaultAdminTransfer();
 
-    // Original admin still works
     assertEq(escrow.defaultAdmin(), admin);
   }
 
@@ -135,7 +128,6 @@ contract AccessControlTest is EscrowTestBase {
     vm.prank(admin);
     escrow.revokeRole(OPERATOR_ROLE, op);
 
-    // Old operator can no longer debit
     escrow.deposit{value: 5 ether}(subSolver);
     vm.prank(op);
     vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, op, OPERATOR_ROLE));
@@ -151,12 +143,10 @@ contract AccessControlTest is EscrowTestBase {
     vm.prank(newAdmin);
     escrow.acceptDefaultAdminTransfer();
 
-    // Old admin can no longer act
     vm.prank(admin);
     vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, admin, ADMIN_ROLE));
     escrow.setCooldownPeriod(99);
 
-    // New admin can act
     vm.prank(newAdmin);
     escrow.setCooldownPeriod(2 days);
     assertEq(escrow.cooldownPeriod(), 2 days);

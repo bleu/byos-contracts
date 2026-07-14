@@ -11,10 +11,12 @@ contract Deploy is Script {
     address _admin = vm.envAddress('ESCROW_ADMIN');
     address _operator = vm.envAddress('ESCROW_OPERATOR');
     uint256 _cooldownPeriod = vm.envOr('COOLDOWN_PERIOD', uint256(1 days));
+    string memory _name = vm.envOr('ESCROW_TOKEN_NAME', string('BYOS Escrow'));
+    string memory _symbol = vm.envOr('ESCROW_TOKEN_SYMBOL', string('BYOS'));
 
     vm.startBroadcast();
 
-    Escrow _escrow = new Escrow(_adminTransferDelay, _admin, _operator, _cooldownPeriod);
+    Escrow _escrow = new Escrow(_adminTransferDelay, _admin, _operator, _cooldownPeriod, _name, _symbol);
     console.log('Escrow deployed at:', address(_escrow));
 
     vm.stopBroadcast();

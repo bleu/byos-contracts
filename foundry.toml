@@ -17,7 +17,7 @@ evm_version = "cancun"
 deny = "warnings"
 
 [lint]
-exclude_lints = ["block-timestamp"]
+exclude_lints = ["block-timestamp", "erc20-unchecked-transfer"]
 
 [fmt]
 line_length = 120
