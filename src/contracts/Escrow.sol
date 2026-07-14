@@ -2,182 +2,161 @@
 pragma solidity ^0.8.28;
 
 import {
-    AccessControlDefaultAdminRules
-} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
+  AccessControlDefaultAdminRules
+} from '@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol';
 
-/// @title BYOS Escrow
-/// @author CoW Protocol Developers
-/// @notice Per-chain, native-token escrow holding sub-solver collateral keyed by sub-solver address.
-/// Anyone may deposit; the sub-solver withdraws subject to a cooldown.
-/// The operator holds exclusive debit authority for revert penalties (Track A)
-/// and EBBO passthrough (Track B). Debited funds are swept to the default admin.
-contract Escrow is AccessControlDefaultAdminRules {
-    // --- Roles ---
+import {IEscrow} from 'interfaces/IEscrow.sol';
 
-    /// @notice Role identifier for the operator (automated BYOS service EOA).
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+contract Escrow is AccessControlDefaultAdminRules, IEscrow {
+  /// @inheritdoc IEscrow
+  bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
 
-    // --- State ---
+  /// @inheritdoc IEscrow
+  mapping(address _subSolver => uint256 _balance) public balances;
 
-    /// @notice Current balance of each sub-solver (increased by deposits, decreased by debits).
-    mapping(address => uint256) public balances;
-    /// @notice Timestamp of pending withdrawal request, or 0 if none.
-    mapping(address => uint256) public withdrawalRequestedAt;
-    /// @notice Whether a sub-solver is frozen (blocks executeWithdrawal).
-    mapping(address => bool) public frozen;
+  /// @inheritdoc IEscrow
+  mapping(address _subSolver => uint256 _requestedAt) public withdrawalRequestedAt;
 
-    /// @notice Seconds a sub-solver must wait between requestWithdrawal and executeWithdrawal.
-    uint256 public cooldownPeriod;
-    /// @notice Debit pool not yet swept to the admin via withdrawDebits().
-    uint256 public accumulatedDebits;
+  /// @inheritdoc IEscrow
+  mapping(address _subSolver => bool _isFrozen) public frozen;
 
-    // --- Events ---
-    event Deposited(address indexed subSolver, uint256 amount);
-    event Debited(address indexed subSolver, uint256 amount, bytes32 reason);
-    event Withdrawn(address indexed subSolver, uint256 amount);
-    event Frozen(address indexed subSolver);
-    event Unfrozen(address indexed subSolver);
-    event DebitsWithdrawn(address indexed to, uint256 amount);
-    event WithdrawalRequested(address indexed subSolver);
-    event WithdrawalCancelled(address indexed subSolver);
-    event CooldownPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
+  /// @inheritdoc IEscrow
+  uint256 public cooldownPeriod;
 
-    // --- Errors ---
-    error InsufficientBalance();
-    error TransferFailed();
-    error NoWithdrawalRequested();
-    error CooldownNotElapsed();
-    error AccountFrozen();
-    error WithdrawalAlreadyRequested();
-    error NothingToWithdraw();
+  /// @inheritdoc IEscrow
+  uint256 public accumulatedDebits;
 
-    /// @param adminTransferDelay Seconds the default-admin transfer must wait before acceptance.
-    /// @param _admin Secure wallet (e.g. multisig) that owns the contract. Granted DEFAULT_ADMIN_ROLE.
-    /// @param operator EOA used by the BYOS service for automated debit/freeze operations. Granted OPERATOR_ROLE.
-    /// @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal.
-    constructor(uint48 adminTransferDelay, address _admin, address operator, uint256 _cooldownPeriod)
-        AccessControlDefaultAdminRules(adminTransferDelay, _admin)
-    {
-        _grantRole(OPERATOR_ROLE, operator);
+  /**
+   * @notice Sets the initial roles and withdrawal cooldown
+   * @param _adminTransferDelay Seconds the default-admin transfer must wait before acceptance
+   * @param _admin Secure wallet (e.g. multisig) that owns the contract; granted DEFAULT_ADMIN_ROLE
+   * @param _operator EOA used by the BYOS service for automated debit/freeze operations; granted OPERATOR_ROLE
+   * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
+   */
+  constructor(
+    uint48 _adminTransferDelay,
+    address _admin,
+    address _operator,
+    uint256 _cooldownPeriod
+  ) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
+    _grantRole(OPERATOR_ROLE, _operator);
+    cooldownPeriod = _cooldownPeriod;
+  }
 
-        cooldownPeriod = _cooldownPeriod;
-    }
+  /// @inheritdoc IEscrow
+  function setCooldownPeriod(
+    uint256 _period
+  ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    uint256 _oldPeriod = cooldownPeriod;
+    cooldownPeriod = _period;
+    emit CooldownPeriodUpdated(_oldPeriod, _period);
+  }
 
-    // --- Admin-only ---
+  /// @inheritdoc IEscrow
+  function debit(
+    address _subSolver,
+    uint256 _amount,
+    bytes32 _reason
+  ) external onlyRole(OPERATOR_ROLE) {
+    if (_amount > balances[_subSolver]) revert Escrow_InsufficientBalance();
+    balances[_subSolver] -= _amount;
+    // Track debits for later sweep to admin
+    accumulatedDebits += _amount;
+    emit Debited(_subSolver, _amount, _reason);
+  }
 
-    /// @notice Update the withdrawal cooldown period.
-    function setCooldownPeriod(uint256 period) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        uint256 oldPeriod = cooldownPeriod;
-        cooldownPeriod = period;
-        emit CooldownPeriodUpdated(oldPeriod, period);
-    }
+  /// @inheritdoc IEscrow
+  function freeze(
+    address _subSolver
+  ) external onlyRole(OPERATOR_ROLE) {
+    frozen[_subSolver] = true;
+    emit Frozen(_subSolver);
+  }
 
-    // --- Operator-only ---
+  /// @inheritdoc IEscrow
+  function unfreeze(
+    address _subSolver
+  ) external onlyRole(OPERATOR_ROLE) {
+    frozen[_subSolver] = false;
+    emit Unfrozen(_subSolver);
+  }
 
-    /// @notice Debit a sub-solver's balance. Used for revert penalties (Track A) and EBBO passthrough (Track B).
-    /// @param subSolver The sub-solver whose balance to debit.
-    /// @param amount The amount to debit in native token.
-    /// @param reason An identifier for the debit (e.g. tx hash for Track A, claim ID for Track B).
-    function debit(address subSolver, uint256 amount, bytes32 reason) external onlyRole(OPERATOR_ROLE) {
-        if (amount > balances[subSolver]) revert InsufficientBalance();
-        balances[subSolver] -= amount;
-        // Track debits for later sweep to admin
-        accumulatedDebits += amount;
-        emit Debited(subSolver, amount, reason);
-    }
+  /// @inheritdoc IEscrow
+  function requestWithdrawal() external {
+    if (withdrawalRequestedAt[msg.sender] != 0) revert Escrow_WithdrawalAlreadyRequested();
+    if (balances[msg.sender] == 0) revert Escrow_InsufficientBalance();
+    withdrawalRequestedAt[msg.sender] = block.timestamp;
+    emit WithdrawalRequested(msg.sender);
+  }
 
-    /// @notice Freeze a sub-solver, blocking withdrawal execution. Used during Track B investigations.
-    function freeze(address subSolver) external onlyRole(OPERATOR_ROLE) {
-        frozen[subSolver] = true;
-        emit Frozen(subSolver);
-    }
+  /// @inheritdoc IEscrow
+  function executeWithdrawal() external {
+    if (withdrawalRequestedAt[msg.sender] == 0) revert Escrow_NoWithdrawalRequested();
+    if (frozen[msg.sender]) revert Escrow_AccountFrozen();
+    if (block.timestamp < withdrawalRequestedAt[msg.sender] + cooldownPeriod) revert Escrow_CooldownNotElapsed();
 
-    /// @notice Unfreeze a sub-solver, allowing pending withdrawals to proceed.
-    function unfreeze(address subSolver) external onlyRole(OPERATOR_ROLE) {
-        frozen[subSolver] = false;
-        emit Unfrozen(subSolver);
-    }
+    uint256 _amount = balances[msg.sender];
+    if (_amount == 0) revert Escrow_NothingToWithdraw();
 
-    // --- Sub-solver ---
+    // Reset sub-solver state before external call (CEI pattern)
+    balances[msg.sender] = 0;
+    withdrawalRequestedAt[msg.sender] = 0;
 
-    /// @notice Request withdrawal of full balance. Effective balance drops to 0 immediately.
-    /// The sub-solver must wait for the cooldown period before executing.
-    function requestWithdrawal() external {
-        if (withdrawalRequestedAt[msg.sender] != 0) revert WithdrawalAlreadyRequested();
-        if (balances[msg.sender] == 0) revert InsufficientBalance();
-        withdrawalRequestedAt[msg.sender] = block.timestamp;
-        emit WithdrawalRequested(msg.sender);
-    }
+    // Send remaining balance (deposits - debits) to the sub-solver
+    (bool _success,) = msg.sender.call{value: _amount}('');
+    if (!_success) revert Escrow_TransferFailed();
 
-    /// @notice Execute a pending withdrawal after cooldown has elapsed. Blocked if frozen.
-    function executeWithdrawal() external {
-        if (withdrawalRequestedAt[msg.sender] == 0) revert NoWithdrawalRequested();
-        if (frozen[msg.sender]) revert AccountFrozen();
-        if (block.timestamp < withdrawalRequestedAt[msg.sender] + cooldownPeriod) revert CooldownNotElapsed();
+    emit Withdrawn(msg.sender, _amount);
+  }
 
-        uint256 amount = balances[msg.sender];
-        if (amount == 0) revert NothingToWithdraw();
+  /// @inheritdoc IEscrow
+  function cancelWithdrawal() external {
+    if (withdrawalRequestedAt[msg.sender] == 0) revert Escrow_NoWithdrawalRequested();
+    withdrawalRequestedAt[msg.sender] = 0;
+    emit WithdrawalCancelled(msg.sender);
+  }
 
-        // Reset sub-solver state before external call (CEI pattern)
-        balances[msg.sender] = 0;
-        withdrawalRequestedAt[msg.sender] = 0;
+  /// @inheritdoc IEscrow
+  function deposit(
+    address _subSolver
+  ) external payable {
+    // TODO: deploy the sub-solver's Trampoline instance via the factory on first
+    // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
+    balances[_subSolver] += msg.value;
+    emit Deposited(_subSolver, msg.value);
+  }
 
-        // Send remaining balance (deposits - debits) to the sub-solver
-        (bool success,) = msg.sender.call{value: amount}("");
-        if (!success) revert TransferFailed();
+  /// @inheritdoc IEscrow
+  function withdrawDebits() external {
+    uint256 _amount = accumulatedDebits;
+    if (_amount == 0) revert Escrow_NothingToWithdraw();
+    accumulatedDebits = 0;
 
-        emit Withdrawn(msg.sender, amount);
-    }
+    address _admin = defaultAdmin();
+    // Send accumulated debits to admin
+    (bool _success,) = _admin.call{value: _amount}('');
+    if (!_success) revert Escrow_TransferFailed();
 
-    /// @notice Cancel a pending withdrawal request. Restores effective balance.
-    /// Can be called regardless of freeze state.
-    function cancelWithdrawal() external {
-        if (withdrawalRequestedAt[msg.sender] == 0) revert NoWithdrawalRequested();
-        withdrawalRequestedAt[msg.sender] = 0;
-        emit WithdrawalCancelled(msg.sender);
-    }
+    emit DebitsWithdrawn(_admin, _amount);
+  }
 
-    // --- Anyone ---
+  /// @inheritdoc IEscrow
+  function balance(
+    address _subSolver
+  ) external view returns (uint256 _balance) {
+    _balance = balances[_subSolver];
+  }
 
-    /// @notice Deposit native token into a sub-solver's escrow balance.
-    /// @param subSolver The sub-solver address to credit.
-    function deposit(address subSolver) external payable {
-        // TODO: deploy the sub-solver's Trampoline instance via the factory on first
-        // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
-        balances[subSolver] += msg.value;
-        emit Deposited(subSolver, msg.value);
-    }
+  /// @inheritdoc IEscrow
+  function effectiveBalance(
+    address _subSolver
+  ) external view returns (uint256 _effectiveBalance) {
+    if (withdrawalRequestedAt[_subSolver] != 0) return 0;
+    _effectiveBalance = balances[_subSolver];
+  }
 
-    /// @notice Sweep accumulated debits to the default admin. Callable by anyone.
-    function withdrawDebits() external {
-        uint256 amount = accumulatedDebits;
-        if (amount == 0) revert NothingToWithdraw();
-        accumulatedDebits = 0;
-
-        address admin = defaultAdmin();
-        // Send accumulated debits to admin
-        (bool success,) = admin.call{value: amount}("");
-        if (!success) revert TransferFailed();
-
-        emit DebitsWithdrawn(admin, amount);
-    }
-
-    // --- Views ---
-
-    /// @notice Sub-solver's current balance.
-    function balance(address subSolver) external view returns (uint256) {
-        return balances[subSolver];
-    }
-
-    /// @notice Sub-solver's effective balance for proposal eligibility.
-    /// Returns 0 if a withdrawal is pending, otherwise returns the balance.
-    function effectiveBalance(address subSolver) external view returns (uint256) {
-        if (withdrawalRequestedAt[subSolver] != 0) return 0;
-        return balances[subSolver];
-    }
-
-    /// @notice Amount of accumulated debits available for admin withdrawal.
-    function withdrawableBalance() external view returns (uint256) {
-        return accumulatedDebits;
-    }
+  /// @inheritdoc IEscrow
+  function withdrawableBalance() external view returns (uint256 _withdrawableBalance) {
+    _withdrawableBalance = accumulatedDebits;
+  }
 }
