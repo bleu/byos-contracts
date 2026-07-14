@@ -1,122 +1,89 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {ECDSA} from '@openzeppelin/contracts/utils/cryptography/ECDSA.sol';
+import {MessageHashUtils} from '@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol';
 
-/// @dev Marker address GPv2 uses for orders buying native ETH (GPv2Order.BUY_ETH_ADDRESS).
-/// Settle-back sends native ETH instead of ERC-20.
-address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+import {BUY_ETH_ADDRESS, ITrampoline, PROPOSAL_TYPEHASH} from 'interfaces/ITrampoline.sol';
 
-/// @dev EIP-712 type hash of the signed proposal struct. The type name "ProposalData"
-/// and its six fields are fixed by ADR-0005 and baked into every sub-solver signature —
-/// renaming the Solidity struct (`Proposal`, which omits the derived interactionsHash
-/// field) is safe, but changing this string invalidates all outstanding signatures.
-bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-    "ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)"
-);
+contract Trampoline is ITrampoline {
+  using SafeERC20 for IERC20;
 
-/// @title BYOS Trampoline
-/// @author CoW Protocol Developers
-/// @notice Per-sub-solver execution sandbox. Receives the trade's sell tokens from
-/// GPv2Settlement, runs the sub-solver's EIP-712-signed route in a fund-less context,
-/// and transfers exactly the promised buy amount back to the settlement contract.
-/// One immutable instance per sub-solver at a deterministic CREATE2 address (ADR-0001).
-contract Trampoline {
-    using SafeERC20 for IERC20;
+  /// @inheritdoc ITrampoline
+  address public immutable SUB_SOLVER;
 
-    /// @notice One call of the sub-solver's route, mirroring GPv2Interaction.Data.
-    struct Interaction {
-        address target;
-        uint256 value;
-        bytes callData;
-    }
+  /// @inheritdoc ITrampoline
+  address public immutable SETTLEMENT;
 
-    /// @notice The signed proposal fields (ADR-0005), minus interactionsHash which is
-    /// recomputed on-chain from the interactions actually being executed.
-    struct Proposal {
-        bytes32 orderUidHash;
-        uint256 sellAmount;
-        uint256 buyAmount;
-        uint256 validUntil;
-        uint256 nonce;
-    }
+  /// @inheritdoc ITrampoline
+  bytes32 public immutable DOMAIN_SEPARATOR;
 
-    /// @notice The sub-solver whose signed proposals this instance executes.
-    address public immutable subSolver;
-    /// @notice The GPv2Settlement contract — the only address allowed to call execute.
-    address public immutable settlement;
-    /// @notice EIP-712 domain separator of the deploying factory (ADR-0005).
-    bytes32 public immutable domainSeparator;
+  /**
+   * @notice Wires the instance to its sub-solver, the settlement contract, and the
+   * factory's EIP-712 domain
+   * @param _subSolver Sub-solver address; proposal signatures must recover to it
+   * @param _settlement GPv2Settlement address
+   * @param _domainSeparator The factory's EIP-712 domain separator
+   */
+  constructor(
+    address _subSolver,
+    address _settlement,
+    bytes32 _domainSeparator
+  ) {
+    SUB_SOLVER = _subSolver;
+    SETTLEMENT = _settlement;
+    DOMAIN_SEPARATOR = _domainSeparator;
+  }
 
-    error OnlySettlement();
-    error ProposalExpired();
-    error InvalidSignature();
-    error EthSettleBackFailed();
+  /**
+   * @notice Accepts native ETH mid-route (e.g. a WETH unwrap or an ETH-paying venue)
+   */
+  receive() external payable {}
 
-    /// @param _subSolver Sub-solver address; proposal signatures must recover to it.
-    /// @param _settlement GPv2Settlement address.
-    /// @param _domainSeparator The factory's EIP-712 domain separator.
-    constructor(address _subSolver, address _settlement, bytes32 _domainSeparator) {
-        subSolver = _subSolver;
-        settlement = _settlement;
-        domainSeparator = _domainSeparator;
-    }
+  /// @inheritdoc ITrampoline
+  function execute(
+    Proposal calldata _proposal,
+    Interaction[] calldata _interactions,
+    address _buyToken,
+    bytes calldata _signature
+  ) external {
+    if (msg.sender != SETTLEMENT) revert Trampoline_OnlySettlement();
+    if (block.timestamp > _proposal.validUntil) revert Trampoline_ProposalExpired();
 
-    /// @notice Execute a sub-solver's signed route and settle back exactly
-    /// `proposal.buyAmount` of `buyToken` to the settlement contract. The transfer's own
-    /// insufficient-balance revert is the funding guard (ADR-0003): a route that falls
-    /// short reverts the settlement. Surplus beyond buyAmount stays in the instance.
-    /// @param proposal The signed proposal fields.
-    /// @param interactions The route, hashed into the verified signature.
-    /// @param buyToken Token to settle back; supplied by BYOS from the order.
-    /// @param signature Sub-solver's EIP-712 signature over the proposal.
-    function execute(
-        Proposal calldata proposal,
-        Interaction[] calldata interactions,
-        address buyToken,
-        bytes calldata signature
-    ) external {
-        if (msg.sender != settlement) revert OnlySettlement();
-        if (block.timestamp > proposal.validUntil) revert ProposalExpired();
+    bytes32 _structHash = keccak256(
+      abi.encode(
+        PROPOSAL_TYPEHASH,
+        _proposal.orderUidHash,
+        _proposal.sellAmount,
+        _proposal.buyAmount,
+        keccak256(abi.encode(_interactions)),
+        _proposal.validUntil,
+        _proposal.nonce
+      )
+    );
+    bytes32 _digest = MessageHashUtils.toTypedDataHash(DOMAIN_SEPARATOR, _structHash);
+    if (ECDSA.recover(_digest, _signature) != SUB_SOLVER) revert Trampoline_InvalidSignature();
 
-        bytes32 structHash = keccak256(
-            abi.encode(
-                PROPOSAL_TYPEHASH,
-                proposal.orderUidHash,
-                proposal.sellAmount,
-                proposal.buyAmount,
-                keccak256(abi.encode(interactions)),
-                proposal.validUntil,
-                proposal.nonce
-            )
-        );
-        bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
-        if (ECDSA.recover(digest, signature) != subSolver) revert InvalidSignature();
-
-        for (uint256 i = 0; i < interactions.length; i++) {
-            Interaction calldata interaction = interactions[i];
-            (bool success, bytes memory returnData) =
-                interaction.target.call{value: interaction.value}(interaction.callData);
-            if (!success) {
-                // Bubble the interaction's revert data so route failures are
-                // attributable from the settlement trace.
-                assembly ("memory-safe") {
-                    revert(add(returnData, 0x20), mload(returnData))
-                }
-            }
+    for (uint256 _i = 0; _i < _interactions.length; ++_i) {
+      Interaction calldata _interaction = _interactions[_i];
+      (bool _success, bytes memory _returnData) =
+        _interaction.target.call{value: _interaction.value}(_interaction.callData);
+      if (!_success) {
+        // Bubble the interaction's revert data so route failures are
+        // attributable from the settlement trace.
+        assembly ('memory-safe') {
+          revert(add(_returnData, 0x20), mload(_returnData))
         }
-
-        if (buyToken == BUY_ETH_ADDRESS) {
-            (bool success,) = settlement.call{value: proposal.buyAmount}("");
-            if (!success) revert EthSettleBackFailed();
-        } else {
-            IERC20(buyToken).safeTransfer(settlement, proposal.buyAmount);
-        }
+      }
     }
 
-    /// @notice Accept native ETH mid-route (e.g. a WETH unwrap or an ETH-paying venue).
-    receive() external payable {}
+    if (_buyToken == BUY_ETH_ADDRESS) {
+      (bool _success,) = SETTLEMENT.call{value: _proposal.buyAmount}('');
+      if (!_success) revert Trampoline_EthSettleBackFailed();
+    } else {
+      IERC20(_buyToken).safeTransfer(SETTLEMENT, _proposal.buyAmount);
+    }
+  }
 }

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 contract Reverter {
-    error Boom(uint256 code);
+  error Boom(uint256 code);
 
-    function explode() external pure {
-        revert Boom(42);
-    }
+  function explode() external pure {
+    revert Boom(42);
+  }
 }
