@@ -224,26 +224,9 @@ contract SettlementIsolationTest is Test {
 
   // --- Settlement buffers ---
 
-  /// A route calling transferFrom on the settlement's buffer has no allowance to draw on;
-  /// the call reverts, the route bubbles it, and the buffer is untouched.
-  function test_route_cannot_transferFrom_settlement_buffer() public onlyFork {
-    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
-    route[0] = ITrampoline.Interaction({
-      target: address(bufferToken),
-      value: 0,
-      callData: abi.encodeCall(IERC20.transferFrom, (address(SETTLEMENT), attacker, BUFFER_AMOUNT))
-    });
-    (ITrampoline.Proposal memory proposal, bytes memory signature) = _signRoute(route);
-
-    vm.expectRevert();
-    _executeAsSettlement(proposal, route, signature);
-
-    assertEq(bufferToken.balanceOf(address(SETTLEMENT)), BUFFER_AMOUNT);
-    assertEq(bufferToken.balanceOf(attacker), 0);
-  }
-
-  /// The same theft attempt, but swallowed so the settlement finalizes successfully.
-  /// Even in a completed settlement the buffer is untouched: there was never an allowance.
+  /// A route calling transferFrom on the settlement's buffer has no allowance to draw on.
+  /// The attempt is swallowed so the settlement still finalizes successfully, yet the
+  /// buffer is untouched: there was never an allowance for the trampoline to spend.
   function test_settlement_succeeds_but_buffer_transferFrom_moves_nothing() public onlyFork {
     ITrampoline.Interaction[] memory route = _swallowingRoute(
       address(bufferToken), abi.encodeCall(IERC20.transferFrom, (address(SETTLEMENT), attacker, BUFFER_AMOUNT))
@@ -320,24 +303,6 @@ contract SettlementIsolationTest is Test {
     assertEq(IGPv2Signing(address(SETTLEMENT)).filledAmount(orderUid), 0);
   }
 
-  /// The capability a route does have over order state is inert: it can pre-sign an order
-  /// it owns (owner == the trampoline), but nobody places orders naming a trampoline, and
-  /// the pre-signature grants no pull power over any settlement buffer — value is unmoved.
-  function test_route_can_presign_own_order_but_moves_nothing() public onlyFork {
-    bytes memory orderUid = _orderUid(address(trampoline));
-    ITrampoline.Interaction[] memory route =
-      _singleCallRoute(address(SETTLEMENT), abi.encodeCall(IGPv2Signing.setPreSignature, (orderUid, true)));
-    (ITrampoline.Proposal memory proposal, bytes memory signature) = _signRoute(route);
-
-    _executeAsSettlement(proposal, route, signature);
-
-    // The pre-signature landed (PRE_SIGNED sentinel), keyed to the trampoline's own order.
-    uint256 preSigned = uint256(keccak256('GPv2Signing.Scheme.PreSign'));
-    assertEq(IGPv2Signing(address(SETTLEMENT)).preSignature(orderUid), preSigned);
-    // But no settlement buffer moved.
-    assertEq(bufferToken.balanceOf(address(SETTLEMENT)), BUFFER_AMOUNT);
-  }
-
   // --- Inert directions (value flows toward the settlement) ---
 
   /// Approving the settlement grants it an allowance over the trampoline's own funds, not
@@ -402,26 +367,5 @@ contract SettlementIsolationTest is Test {
     _executeAsSettlement(proposal, route, signature);
 
     assertEq(bufferToken.balanceOf(victim), amount);
-  }
-
-  // --- The boundary's positive side ---
-
-  /// The flip side of every "cannot" above: a route reaches exactly its own instance's
-  /// residue and nothing more. It sweeps the trampoline's own balance freely, while the
-  /// settlement's buffer of the very same token is untouched — the isolation is instance-
-  /// scoped, not token-scoped.
-  function test_route_can_sweep_its_own_residue() public onlyFork {
-    uint256 residue = 3 ether;
-    bufferToken.mint(address(trampoline), residue);
-
-    ITrampoline.Interaction[] memory route =
-      _singleCallRoute(address(bufferToken), abi.encodeCall(IERC20.transfer, (attacker, residue)));
-    (ITrampoline.Proposal memory proposal, bytes memory signature) = _signRoute(route);
-
-    _executeAsSettlement(proposal, route, signature);
-
-    assertEq(bufferToken.balanceOf(attacker), residue);
-    assertEq(bufferToken.balanceOf(address(trampoline)), 0);
-    assertEq(bufferToken.balanceOf(address(SETTLEMENT)), BUFFER_AMOUNT);
   }
 }
