@@ -2,8 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
+import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 
 contract Escrow is IEscrow {
+  /// @inheritdoc IEscrow
+  ITrampolineFactory public immutable TRAMPOLINE_FACTORY;
+
   /// @inheritdoc IEscrow
   mapping(address _subSolver => uint256 _balance) public balances;
 
@@ -49,16 +53,19 @@ contract Escrow is IEscrow {
    * @param _owner Secure wallet (e.g. multisig) that owns the contract; receives debited funds
    * @param _operator EOA used by the BYOS service for automated debit/freeze operations
    * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
+   * @param _trampolineFactory Deployer of per-sub-solver Trampoline instances
    */
   constructor(
     address _owner,
     address _operator,
-    uint256 _cooldownPeriod
+    uint256 _cooldownPeriod,
+    ITrampolineFactory _trampolineFactory
   ) {
-    if (_owner == address(0)) revert Escrow_ZeroAddress();
+    if (_owner == address(0) || address(_trampolineFactory) == address(0)) revert Escrow_ZeroAddress();
     owner = _owner;
     operator = _operator;
     cooldownPeriod = _cooldownPeriod;
+    TRAMPOLINE_FACTORY = _trampolineFactory;
   }
 
   /// @inheritdoc IEscrow
@@ -165,9 +172,8 @@ contract Escrow is IEscrow {
   function deposit(
     address _subSolver
   ) external payable {
-    // TODO: deploy the sub-solver's Trampoline instance via the factory on first
-    // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
     balances[_subSolver] += msg.value;
+    TRAMPOLINE_FACTORY.ensureDeployed(_subSolver);
     emit Deposited(_subSolver, msg.value);
   }
 

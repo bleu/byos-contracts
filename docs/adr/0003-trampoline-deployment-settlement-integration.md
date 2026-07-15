@@ -31,8 +31,8 @@ pushed in. The trampoline cannot pay the user directly.
 
 Instances are deployed at a deterministic CREATE2 address keyed by sub-solver address,
 at escrow-deposit time, paid by the sub-solver: `Escrow.deposit()` triggers the factory
-deploy for the credited sub-solver. The hook lands together with the Trampoline factory
-(tracked as a TODO in [`Escrow.sol`](../../src/contracts/Escrow.sol)). Settlements
+deploy for the credited sub-solver (implemented: `Escrow.deposit` calls the factory's
+idempotent `ensureDeployed`). Settlements
 assume the instance exists: there is no on-chain `ensureDeployed` guard in the hot path,
 though BYOS may `eth_getCode` off-chain as a sanity check when building the solution.
 
