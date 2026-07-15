@@ -42,20 +42,18 @@ The `balances` mapping from ADR-0002 is removed. `balanceOf(subSolver)` is the s
 source of truth. `totalSupply()` plus `accumulatedDebits` equals the contract's ETH
 balance (invariant).
 
-### Transfers: `transfer` only, no allowances
+### Transfers: `transfer` and `transferFrom` with Trampoline deployment
 
-`approve()` and `transferFrom()` are disabled (revert unconditionally). `allowance()`
-returns 0 (avoids breaking tools that check allowance before calling `transferFrom`).
-Sub-solvers transfer via `transfer(to, amount)` only.
+Both `transfer(to, amount)` and `transferFrom(from, to, amount)` are supported.
+`approve()` and `allowance()` use standard ERC20 semantics. Both transfer functions
+deploy a Trampoline instance for the recipient via `TRAMPOLINE_FACTORY.ensureDeployed(to)`
+after moving tokens, ensuring the recipient is ready to participate in settlements
+immediately (same behavior as `deposit`).
 
-Rationale: the key rotation use case requires the sub-solver to move their own collateral
-to a new address they control. There is no use case for third-party-initiated transfers.
-Disabling allowances eliminates the approval front-running attack surface and stale
-allowance risks entirely.
-
-The contract still inherits the full ERC20 interface for ecosystem compatibility — block
-explorers, wallets, and indexers will recognize the token and display balances. The
-disabled functions satisfy the interface but revert on call (`allowance` returns 0).
+The `transferFrom` path enables third-party-initiated transfers with prior approval.
+This is useful for operational tooling (e.g., a management contract that migrates
+collateral on behalf of a sub-solver) and preserves full ERC20 compatibility — block
+explorers, wallets, indexers, and standard tooling work without special-casing.
 
 ### Transfer restrictions via `_update` override
 
@@ -91,7 +89,7 @@ A new `pause()` / `unpause()` capability, callable by the `OPERATOR_ROLE`:
 
 | Operation | During pause |
 |---|---|
-| `transfer` | Blocked |
+| `transfer` / `transferFrom` | Blocked |
 | `deposit` (mint) | Allowed |
 | `debit` (operator burn) | Allowed |
 | `executeWithdrawal` (self-burn) | Blocked |
@@ -185,9 +183,9 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules {
     function pause() external;
     function unpause() external;
 
-    // --- New: ERC20 overrides ---
-    function approve(address, uint256) public override returns (bool);    // always reverts
-    function transferFrom(address, address, uint256) public override returns (bool); // always reverts
+    // --- New: ERC20 overrides (deploy Trampoline for recipient) ---
+    function transfer(address to, uint256 value) public override returns (bool);
+    function transferFrom(address from, address to, uint256 value) public override returns (bool);
 
     // --- Unchanged from ADR-0002 ---
     // (admin-only) setCooldownPeriod
@@ -230,9 +228,11 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules {
 - **OpenZeppelin `ERC20Pausable`.** Standard pause implementation. Rejected — pauses
   *all* token operations including mints (deposits) and burns (debits), which must remain
   operational during a pause. A custom `_update` override with granular rules is required.
-- **ERC20 with allowances enabled.** Full ERC20 compliance including `approve` /
-  `transferFrom`. Rejected — no use case for third-party transfers; allowances add
-  front-running and stale-approval attack surface for no benefit.
+- **ERC20 with allowances disabled.** Disabling `approve` / `transferFrom` (revert
+  unconditionally) to eliminate the approval front-running attack surface. Rejected —
+  prevents third-party operational tooling from managing transfers and breaks full ERC20
+  compatibility. The transfer restrictions (`_update` override) already guard against
+  misuse; allowances add flexibility without weakening security invariants.
 
 ## Consequences
 
@@ -252,10 +252,11 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules {
   address a potential debit target. The operator is trusted not to over-debit, and the
   debit cap (amount received from the bad actor) is enforced off-chain. This extends the
   existing trust model.
-- **The token is non-standard in practice.** Disabled allowances and conditional transfer
-  restrictions mean the token won't integrate with DEXes, lending protocols, or other DeFi
-  composability. This is intentional — the token represents escrowed collateral, not a
-  tradeable asset.
+- **The token is ERC20-compliant but transfer-restricted.** Standard `approve` /
+  `transferFrom` / `allowance` work normally, but conditional transfer restrictions
+  (pause, freeze, pending withdrawal) mean the token won't integrate seamlessly with
+  DEXes, lending protocols, or other DeFi composability. This is intentional — the token
+  represents escrowed collateral, not a tradeable asset.
 - **Pause is a powerful operator capability.** A malicious or compromised operator can
   halt all transfers globally. Mitigation: the owner (cold wallet) can revoke the
   operator role. This is consistent with the existing trust model where a compromised

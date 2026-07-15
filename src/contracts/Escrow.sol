@@ -69,28 +69,14 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
   }
 
   /// @inheritdoc IEscrow
-  function approve(
-    address,
-    uint256
-  ) public pure override(ERC20, IEscrow) returns (bool) {
-    revert Escrow_AllowancesDisabled();
-  }
-
-  /// @inheritdoc IEscrow
   function transferFrom(
-    address,
-    address,
-    uint256
-  ) public pure override(ERC20, IEscrow) returns (bool) {
-    revert Escrow_AllowancesDisabled();
-  }
-
-  /// @inheritdoc IEscrow
-  function allowance(
-    address,
-    address
-  ) public pure override(ERC20, IEscrow) returns (uint256) {
-    return 0;
+    address _from,
+    address _to,
+    uint256 _value
+  ) public override(ERC20, IEscrow) returns (bool) {
+    bool _success = super.transferFrom(_from, _to, _value);
+    TRAMPOLINE_FACTORY.ensureDeployed(_to);
+    return _success;
   }
 
   /// @dev Enforces transfer restrictions per ADR-0007:

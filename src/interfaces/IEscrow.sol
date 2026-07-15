@@ -10,8 +10,8 @@ import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
  * @author CoW Protocol Developers
  * @notice Per-chain, native-token ERC20 escrow holding sub-solver collateral keyed by sub-solver
  * address. Tokens are minted 1:1 with deposited ETH and burned on withdrawal or debit.
- * Sub-solvers may transfer tokens to migrate collateral (e.g. key rotation) but
- * approve/transferFrom are disabled — only direct transfer is supported.
+ * Sub-solvers may transfer tokens to migrate collateral (e.g. key rotation) via `transfer`
+ * or `transferFrom` (with prior approval). Both deploy a Trampoline for the recipient.
  * Transfers are restricted by pause state, freeze state, and pending withdrawal status.
  * The operator (OPERATOR_ROLE) holds exclusive debit authority for revert penalties
  * (Track A) and EBBO passthrough (Track B). Debited funds are swept to the default admin.
@@ -146,11 +146,6 @@ interface IEscrow is IERC20 {
   error Escrow_ExpectedPause();
 
   /**
-   * @notice Throws if trying to use approve or transferFrom (disabled)
-   */
-  error Escrow_AllowancesDisabled();
-
-  /**
    * @notice Throws if a transfer involves an address with a pending withdrawal
    */
   error Escrow_WithdrawalPending();
@@ -241,34 +236,20 @@ interface IEscrow is IERC20 {
   ) external returns (bool _success);
 
   /**
-   * @notice Disabled. This token does not support allowances.
-   * @dev Always reverts with Escrow_AllowancesDisabled.
-   */
-  function approve(
-    address _spender,
-    uint256 _value
-  ) external returns (bool);
-
-  /**
-   * @notice Disabled. This token does not support third-party transfers.
-   * @dev Always reverts with Escrow_AllowancesDisabled.
+   * @notice Transfers tokens from `_from` to `_to` using the allowance mechanism and deploys a
+   * Trampoline instance for the recipient if needed
+   * @dev Blocked if paused, if either party is frozen, or if either party has a pending withdrawal.
+   * Requires prior approval via `approve`.
+   * @param _from The sender address
+   * @param _to The recipient address
+   * @param _value The amount of tokens to transfer
+   * @return _success True if the transfer succeeded
    */
   function transferFrom(
     address _from,
     address _to,
     uint256 _value
-  ) external returns (bool);
-
-  /**
-   * @notice Always returns 0. Allowances are disabled.
-   * @param _owner The token owner (unused)
-   * @param _spender The spender (unused)
-   * @return _remaining Always 0
-   */
-  function allowance(
-    address _owner,
-    address _spender
-  ) external view returns (uint256 _remaining);
+  ) external returns (bool _success);
 
   /**
    * @notice Updates the withdrawal cooldown period

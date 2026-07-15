@@ -40,21 +40,76 @@ contract ERC20Test is EscrowTestBase {
     assertInvariant();
   }
 
-  // --- Disabled allowances ---
+  // --- Allowances ---
 
-  function test_approve_always_reverts() public {
+  function test_approve_sets_allowance() public {
+    escrow.deposit{value: 10 ether}(subSolver);
     vm.prank(subSolver);
-    vm.expectRevert(IEscrow.Escrow_AllowancesDisabled.selector);
-    escrow.approve(subSolver2, 1 ether);
+    escrow.approve(subSolver2, 5 ether);
+    assertEq(escrow.allowance(subSolver, subSolver2), 5 ether);
   }
 
-  function test_transfer_from_always_reverts() public {
+  function test_transfer_from_with_approval() public {
+    escrow.deposit{value: 10 ether}(subSolver);
     vm.prank(subSolver);
-    vm.expectRevert(IEscrow.Escrow_AllowancesDisabled.selector);
+    escrow.approve(subSolver2, 4 ether);
+
+    vm.prank(subSolver2);
+    escrow.transferFrom(subSolver, subSolver2, 4 ether);
+
+    assertEq(escrow.balanceOf(subSolver), 6 ether);
+    assertEq(escrow.balanceOf(subSolver2), 4 ether);
+    assertEq(escrow.allowance(subSolver, subSolver2), 0);
+  }
+
+  function test_transfer_from_reverts_without_approval() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(subSolver2);
+    vm.expectRevert();
     escrow.transferFrom(subSolver, subSolver2, 1 ether);
   }
 
-  function test_allowance_always_returns_zero() public view {
-    assertEq(escrow.allowance(subSolver, subSolver2), 0);
+  function test_transfer_from_deploys_trampoline_for_recipient() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    address newAddr = makeAddr('newAddr');
+
+    vm.prank(subSolver);
+    escrow.approve(subSolver2, 5 ether);
+
+    address predicted = escrow.TRAMPOLINE_FACTORY().addressOf(newAddr);
+    assertEq(predicted.code.length, 0);
+
+    vm.prank(subSolver2);
+    escrow.transferFrom(subSolver, newAddr, 3 ether);
+
+    assertGt(predicted.code.length, 0);
+    assertEq(escrow.balanceOf(newAddr), 3 ether);
+  }
+
+  function test_transfer_from_reverts_when_paused() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    vm.prank(subSolver);
+    escrow.approve(subSolver2, 5 ether);
+
+    vm.prank(op);
+    escrow.pause();
+
+    vm.prank(subSolver2);
+    vm.expectRevert(IEscrow.Escrow_EnforcedPause.selector);
+    escrow.transferFrom(subSolver, subSolver2, 1 ether);
+  }
+
+  function test_transfer_from_reverts_if_sender_frozen() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    vm.prank(subSolver);
+    escrow.approve(subSolver2, 5 ether);
+
+    vm.prank(op);
+    escrow.freeze(subSolver);
+
+    vm.prank(subSolver2);
+    vm.expectRevert(IEscrow.Escrow_AccountFrozen.selector);
+    escrow.transferFrom(subSolver, subSolver2, 1 ether);
   }
 }
