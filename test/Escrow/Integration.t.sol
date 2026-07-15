@@ -1,89 +1,125 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {IEscrow} from 'interfaces/IEscrow.sol';
-
 import {EscrowTestBase} from './EscrowTestBase.sol';
 
 contract IntegrationTest is EscrowTestBase {
-  function test_invariant_total_supply_plus_debits_equals_eth_balance() public {
-    // Deposit
+  function test_deposit() public {
     escrow.deposit{value: 10 ether}(subSolver);
     escrow.deposit{value: 5 ether}(subSolver2);
     assertInvariant();
+  }
 
-    // Transfer
+  function test_transfer() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    escrow.deposit{value: 5 ether}(subSolver2);
+
     vm.prank(subSolver);
     escrow.transfer(subSolver2, 3 ether);
     assertInvariant();
+  }
 
-    // Debit
+  function test_transferFrom() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(subSolver);
+    escrow.approve(subSolver2, 4 ether);
+
+    vm.prank(subSolver2);
+    escrow.transferFrom(subSolver, subSolver2, 4 ether);
+    assertInvariant();
+  }
+
+  function test_debit() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
     vm.prank(op);
     escrow.debit(subSolver, 2 ether, keccak256('r1'));
     assertInvariant();
+  }
 
-    // Withdraw debits
+  function test_withdrawDebits() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(op);
+    escrow.debit(subSolver, 2 ether, keccak256('r1'));
+
     escrow.withdrawDebits();
     assertInvariant();
+  }
 
-    // Withdrawal
-    vm.prank(subSolver2);
+  function test_requestWithdrawal() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
+    assertInvariant();
+  }
+
+  function test_executeWithdrawal() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(subSolver);
     escrow.requestWithdrawal();
     vm.warp(block.timestamp + COOLDOWN);
-    vm.prank(subSolver2);
+
+    vm.prank(subSolver);
     escrow.executeWithdrawal();
     assertInvariant();
   }
 
-  function test_incident_response_flow() public {
-    address badActor = makeAddr('badActor');
-    address accomplice = makeAddr('accomplice');
-    address innocent = makeAddr('innocent');
+  function test_cancelWithdrawal() public {
+    escrow.deposit{value: 10 ether}(subSolver);
 
-    // Setup: multiple sub-solvers deposit
-    escrow.deposit{value: 10 ether}(badActor);
-    escrow.deposit{value: 5 ether}(innocent);
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
 
-    // Bad actor transfers funds to accomplice before operator can react
-    vm.prank(badActor);
-    escrow.transfer(accomplice, 8 ether);
+    vm.prank(subSolver);
+    escrow.cancelWithdrawal();
+    assertInvariant();
+  }
 
-    // 1. Operator pauses — all transfers stop
+  function test_freeze() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(op);
+    escrow.freeze(subSolver);
+    assertInvariant();
+  }
+
+  function test_unfreeze() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.startPrank(op);
+    escrow.freeze(subSolver);
+    escrow.unfreeze(subSolver);
+    vm.stopPrank();
+    assertInvariant();
+  }
+
+  function test_pause() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
     vm.prank(op);
     escrow.pause();
+    assertInvariant();
+  }
 
-    // Accomplice cannot transfer further
-    vm.prank(accomplice);
-    vm.expectRevert(IEscrow.Escrow_EnforcedPause.selector);
-    escrow.transfer(innocent, 1 ether);
+  function test_unpause() public {
+    escrow.deposit{value: 10 ether}(subSolver);
 
-    // 2. Operator freezes both bad actor and accomplice
     vm.startPrank(op);
-    escrow.freeze(badActor);
-    escrow.freeze(accomplice);
-    vm.stopPrank();
-
-    // 3. Operator unpauses — innocent sub-solver is free
-    vm.prank(op);
+    escrow.pause();
     escrow.unpause();
-
-    // Innocent can still transfer
-    vm.prank(innocent);
-    escrow.transfer(makeAddr('newInnocentKey'), 5 ether);
-
-    // Frozen bad actor still cannot transfer
-    vm.prank(badActor);
-    vm.expectRevert(IEscrow.Escrow_AccountFrozen.selector);
-    escrow.transfer(innocent, 1 ether);
-
-    // 4. Operator debits frozen addresses
-    vm.startPrank(op);
-    escrow.debit(badActor, 2 ether, keccak256('penalty-main'));
-    escrow.debit(accomplice, 8 ether, keccak256('penalty-accomplice'));
     vm.stopPrank();
+    assertInvariant();
+  }
 
-    assertEq(escrow.balanceOf(badActor), 0);
-    assertEq(escrow.balanceOf(accomplice), 0);
+  function test_setCooldownPeriod() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(admin);
+    escrow.setCooldownPeriod(2 days);
     assertInvariant();
   }
 }

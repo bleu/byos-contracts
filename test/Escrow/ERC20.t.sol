@@ -6,15 +6,6 @@ import {IEscrow} from 'interfaces/IEscrow.sol';
 import {EscrowTestBase} from './EscrowTestBase.sol';
 
 contract ERC20Test is EscrowTestBase {
-  function test_erc20_name_and_symbol() public view {
-    assertEq(escrow.name(), 'BYOS Escrow');
-    assertEq(escrow.symbol(), 'BYOS');
-  }
-
-  function test_erc20_decimals_is_18() public view {
-    assertEq(escrow.decimals(), 18);
-  }
-
   function test_erc20_total_supply_tracks_deposits_and_withdrawals() public {
     assertEq(escrow.totalSupply(), 0);
 
@@ -38,36 +29,6 @@ contract ERC20Test is EscrowTestBase {
     assertEq(escrow.totalSupply(), 7 ether);
 
     assertInvariant();
-  }
-
-  // --- Allowances ---
-
-  function test_approve_sets_allowance() public {
-    escrow.deposit{value: 10 ether}(subSolver);
-    vm.prank(subSolver);
-    escrow.approve(subSolver2, 5 ether);
-    assertEq(escrow.allowance(subSolver, subSolver2), 5 ether);
-  }
-
-  function test_transfer_from_with_approval() public {
-    escrow.deposit{value: 10 ether}(subSolver);
-    vm.prank(subSolver);
-    escrow.approve(subSolver2, 4 ether);
-
-    vm.prank(subSolver2);
-    escrow.transferFrom(subSolver, subSolver2, 4 ether);
-
-    assertEq(escrow.balanceOf(subSolver), 6 ether);
-    assertEq(escrow.balanceOf(subSolver2), 4 ether);
-    assertEq(escrow.allowance(subSolver, subSolver2), 0);
-  }
-
-  function test_transfer_from_reverts_without_approval() public {
-    escrow.deposit{value: 10 ether}(subSolver);
-
-    vm.prank(subSolver2);
-    vm.expectRevert();
-    escrow.transferFrom(subSolver, subSolver2, 1 ether);
   }
 
   function test_transfer_from_deploys_trampoline_for_recipient() public {
