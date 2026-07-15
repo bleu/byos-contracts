@@ -56,31 +56,9 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
     TRAMPOLINE_FACTORY = _trampolineFactory;
   }
 
-  // --- ERC20 overrides ---
-
-  /// @inheritdoc IEscrow
-  function transfer(
-    address _to,
-    uint256 _value
-  ) public override(ERC20, IEscrow) returns (bool) {
-    bool _success = super.transfer(_to, _value);
-    TRAMPOLINE_FACTORY.ensureDeployed(_to);
-    return _success;
-  }
-
-  /// @inheritdoc IEscrow
-  function transferFrom(
-    address _from,
-    address _to,
-    uint256 _value
-  ) public override(ERC20, IEscrow) returns (bool) {
-    bool _success = super.transferFrom(_from, _to, _value);
-    TRAMPOLINE_FACTORY.ensureDeployed(_to);
-    return _success;
-  }
-
-  /// @dev Enforces transfer restrictions per ADR-0007:
+  /// @dev Enforces transfer restrictions per ADR-0007 and deploys a Trampoline for transfer recipients:
   /// - Transfers: blocked if paused, sender/receiver frozen, or sender/receiver has pending withdrawal.
+  ///   Deploys a Trampoline for the recipient via TRAMPOLINE_FACTORY.ensureDeployed.
   /// - Mints: blocked if receiver has pending withdrawal.
   /// - Burns: no restrictions — calling functions enforce their own constraints.
   function _update(
@@ -100,6 +78,10 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
       if (withdrawalRequestedAt[_to] != 0) revert Escrow_WithdrawalPending();
     } else if (_isMint) {
       if (withdrawalRequestedAt[_to] != 0) revert Escrow_WithdrawalPending();
+    }
+
+    if (!_isBurn) {
+      TRAMPOLINE_FACTORY.ensureDeployed(_to);
     }
 
     super._update(_from, _to, _value);

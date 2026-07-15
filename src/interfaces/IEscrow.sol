@@ -224,34 +224,6 @@ interface IEscrow is IERC20 {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Transfers tokens to `_to` and deploys a Trampoline instance for the recipient if needed
-   * @dev Blocked if paused, if either party is frozen, or if either party has a pending withdrawal.
-   * @param _to The recipient address
-   * @param _value The amount of tokens to transfer
-   * @return _success True if the transfer succeeded
-   */
-  function transfer(
-    address _to,
-    uint256 _value
-  ) external returns (bool _success);
-
-  /**
-   * @notice Transfers tokens from `_from` to `_to` using the allowance mechanism and deploys a
-   * Trampoline instance for the recipient if needed
-   * @dev Blocked if paused, if either party is frozen, or if either party has a pending withdrawal.
-   * Requires prior approval via `approve`.
-   * @param _from The sender address
-   * @param _to The recipient address
-   * @param _value The amount of tokens to transfer
-   * @return _success True if the transfer succeeded
-   */
-  function transferFrom(
-    address _from,
-    address _to,
-    uint256 _value
-  ) external returns (bool _success);
-
-  /**
    * @notice Updates the withdrawal cooldown period
    * @dev Only callable by the default admin
    * @param _period The new cooldown period in seconds
