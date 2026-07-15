@@ -35,7 +35,7 @@ proposals.
 
 ## Decision
 
-Residue is the sub-solver's property, reclaimable through a `claim` function on their
+Residue is the sub-solver's property, reclaimable through the claim functions on their
 instance. It sits entirely outside the collateral model: BYOS has no key over it — no
 sweep, no freeze, no debit.
 
@@ -59,11 +59,14 @@ owner taking their own reward through a side door.
 Finally, this keeps the merged hot path untouched: `execute`'s exact-amount transfer
 remains the funding guard, with no per-settlement sweep gas.
 
-### The claim function
+### The claim functions
 
 ```solidity
-function claim(address[] calldata tokens, address recipient) external;
+function claimToken(address token, address recipient) external;
+function claimTokens(address[] calldata tokens, address recipient) external;
 ```
+
+`claimTokens` is the batch form of `claimToken`; both share the same per-token logic.
 
 - Callable only by `SUB_SOLVER`. Gating makes the free `recipient` parameter safe, and
   the recipient matters: the sub-solver key is already load-bearing three ways (proposal
@@ -78,7 +81,7 @@ function claim(address[] calldata tokens, address recipient) external;
 - Emits a `ResidueClaimed` event per token for off-chain accounting.
 
 One behavior is documented rather than guarded: if `SUB_SOLVER` is a contract, a route
-interaction could call back into it and reenter `claim` mid-settlement, pulling trade
+interaction could call back into it and reenter a claim mid-settlement, pulling trade
 capital out from under the route. The exact-amount settle-back transfer then reverts,
 which reverts the entire settlement — the sub-solver gains nothing and eats their own
 Track A debit. Self-harm needs no guard; the transfer-as-guard posture of ADR-0003
@@ -139,7 +142,8 @@ not a contract invariant.
 
 ## Consequences
 
-- The Trampoline gains `claim`, a `ResidueClaimed` event, and an only-sub-solver error.
+- The Trampoline gains `claimToken`/`claimTokens`, a `ResidueClaimed` event, and an
+  only-sub-solver error.
   It stays storage-free and keeps zero privileged keys.
 - ADR-0001's sweep post-condition is superseded (pointer note added there); ADR-0003's
   open question closes.
@@ -148,5 +152,5 @@ not a contract invariant.
   to nothing else.
 - Residue never counts toward collateral. The BYOS service must not assume instance
   balances are recoverable when sizing sub-solver exposure.
-- Exotic tokens (fee-on-transfer, rebasing) are the claimer's own concern; `claim`
+- Exotic tokens (fee-on-transfer, rebasing) are the claimer's own concern; a claim
   transfers whatever the token contract does with a full-balance transfer.

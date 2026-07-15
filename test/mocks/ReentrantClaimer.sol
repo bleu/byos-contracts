@@ -10,8 +10,6 @@ contract ReentrantClaimer {
     address token,
     address recipient
   ) external {
-    address[] memory tokens = new address[](1);
-    tokens[0] = token;
-    trampoline.claim(tokens, recipient);
+    trampoline.claimToken(token, recipient);
   }
 }

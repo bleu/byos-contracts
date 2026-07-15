@@ -153,15 +153,26 @@ interface ITrampoline {
   ) external;
 
   /**
-   * @notice Transfers the instance's full balance of each listed token to `_recipient`
+   * @notice Transfers the instance's full balance of `_token` to `_recipient`
    * @dev Residue is the sub-solver's property (ADR-0008). The instance is storage-free
-   * and cannot enumerate what it holds; the caller lists tokens off-chain. Use
+   * and cannot enumerate what it holds; the caller identifies tokens off-chain. Use
    * BUY_ETH_ADDRESS to claim native ETH. Residue is at risk to allow-listed-solver
    * replay while any signed proposal for this instance is unexpired — claim promptly.
+   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balance
+   */
+  function claimToken(
+    address _token,
+    address _recipient
+  ) external;
+
+  /**
+   * @notice Transfers the instance's full balance of each listed token to `_recipient`
+   * @dev Batch form of claimToken; same semantics per token
    * @param _tokens The tokens to claim; full balance each, BUY_ETH_ADDRESS for native ETH
    * @param _recipient The address receiving the claimed balances
    */
-  function claim(
+  function claimTokens(
     address[] calldata _tokens,
     address _recipient
   ) external;

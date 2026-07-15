@@ -345,37 +345,34 @@ contract TrampolineTest is Test {
 
   // --- Residue claim (ADR-0008) ---
 
-  function test_claim_transfers_full_token_balance_to_recipient() public {
+  function test_claim_token_transfers_full_balance_to_recipient() public {
     address treasury = makeAddr('treasury');
     uint256 residue = 5 ether;
     buyToken.mint(address(trampoline), residue);
 
-    address[] memory tokens = new address[](1);
-    tokens[0] = address(buyToken);
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.ResidueClaimed(address(buyToken), residue, treasury);
 
     vm.prank(subSolver);
-    trampoline.claim(tokens, treasury);
+    trampoline.claimToken(address(buyToken), treasury);
 
     assertEq(buyToken.balanceOf(treasury), residue);
     assertEq(buyToken.balanceOf(address(trampoline)), 0);
   }
 
-  function test_claim_sends_native_eth_for_sentinel_token() public {
+  function test_claim_token_sends_native_eth_for_sentinel_token() public {
     address treasury = makeAddr('treasury');
     uint256 residue = 3 ether;
     vm.deal(address(trampoline), residue);
 
-    address[] memory tokens = new address[](1);
-    tokens[0] = BUY_ETH_ADDRESS;
-
     vm.prank(subSolver);
-    trampoline.claim(tokens, treasury);
+    trampoline.claimToken(BUY_ETH_ADDRESS, treasury);
 
     assertEq(treasury.balance, residue);
     assertEq(address(trampoline).balance, 0);
   }
 
-  function test_claim_handles_multiple_tokens_and_emits_event_per_token() public {
+  function test_claim_tokens_claims_each_and_emits_event_per_token() public {
     address treasury = makeAddr('treasury');
     buyToken.mint(address(trampoline), 5 ether);
     sellToken.mint(address(trampoline), 2 ether);
@@ -394,26 +391,31 @@ contract TrampolineTest is Test {
     emit ITrampoline.ResidueClaimed(BUY_ETH_ADDRESS, 1 ether, treasury);
 
     vm.prank(subSolver);
-    trampoline.claim(tokens, treasury);
+    trampoline.claimTokens(tokens, treasury);
 
     assertEq(buyToken.balanceOf(treasury), 5 ether);
     assertEq(sellToken.balanceOf(treasury), 2 ether);
     assertEq(treasury.balance, 1 ether);
   }
 
-  function test_claim_reverts_when_recipient_rejects_native_eth() public {
+  function test_claim_token_reverts_when_recipient_rejects_native_eth() public {
     vm.deal(address(trampoline), 1 ether);
-
-    address[] memory tokens = new address[](1);
-    tokens[0] = BUY_ETH_ADDRESS;
     address noReceive = address(new Reverter());
 
     vm.prank(subSolver);
     vm.expectRevert(ITrampoline.Trampoline_EthClaimFailed.selector);
-    trampoline.claim(tokens, noReceive);
+    trampoline.claimToken(BUY_ETH_ADDRESS, noReceive);
   }
 
-  function test_claim_reverts_when_caller_not_sub_solver() public {
+  function test_claim_token_reverts_when_caller_not_sub_solver() public {
+    buyToken.mint(address(trampoline), 5 ether);
+
+    vm.prank(makeAddr('mallory'));
+    vm.expectRevert(ITrampoline.Trampoline_OnlySubSolver.selector);
+    trampoline.claimToken(address(buyToken), makeAddr('mallory'));
+  }
+
+  function test_claim_tokens_reverts_when_caller_not_sub_solver() public {
     buyToken.mint(address(trampoline), 5 ether);
 
     address[] memory tokens = new address[](1);
@@ -421,7 +423,7 @@ contract TrampolineTest is Test {
 
     vm.prank(makeAddr('mallory'));
     vm.expectRevert(ITrampoline.Trampoline_OnlySubSolver.selector);
-    trampoline.claim(tokens, makeAddr('mallory'));
+    trampoline.claimTokens(tokens, makeAddr('mallory'));
   }
 
   function test_claim_mid_settlement_reverts_own_settlement_only() public {
