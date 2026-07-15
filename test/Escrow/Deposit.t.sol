@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
 
-import {EscrowTestBase} from './EscrowTestBase.sol';
+import {EscrowTestBase, ReentrantDepositor} from './EscrowTestBase.sol';
 
 contract DepositTest is EscrowTestBase {
   function test_deposit_credits_sub_solver() public {
@@ -46,6 +46,30 @@ contract DepositTest is EscrowTestBase {
     escrow.deposit{value: 1 ether}(subSolver);
 
     assertGt(predicted.code.length, 0);
+  }
+
+  // --- Reentrancy ---
+
+  function test_deposit_reentrancy_from_executeWithdrawal_preserves_invariant() public {
+    ReentrantDepositor depositor = new ReentrantDepositor(escrow, subSolver);
+
+    // Fund the depositor and deposit into its escrow balance
+    escrow.deposit{value: 5 ether}(address(depositor));
+    assertEq(escrow.balanceOf(address(depositor)), 5 ether);
+
+    // Request withdrawal and wait for cooldown
+    depositor.requestWithdrawal();
+    vm.warp(block.timestamp + COOLDOWN);
+
+    // Execute withdrawal — depositor's receive() will re-deposit for subSolver
+    depositor.executeWithdrawal();
+
+    // Depositor's balance was burned during withdrawal
+    assertEq(escrow.balanceOf(address(depositor)), 0);
+    // Re-deposited ETH was minted to subSolver
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
+    // Core invariant holds
+    assertInvariant();
   }
 
   // --- Events ---

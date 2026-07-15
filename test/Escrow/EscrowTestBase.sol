@@ -45,6 +45,33 @@ contract RejectETH {
   }
 }
 
+/// @dev Contract that re-deposits into Escrow when receiving ETH (e.g. from executeWithdrawal).
+contract ReentrantDepositor {
+  Escrow public target;
+  address public beneficiary;
+
+  constructor(
+    Escrow _target,
+    address _beneficiary
+  ) {
+    target = _target;
+    beneficiary = _beneficiary;
+  }
+
+  function requestWithdrawal() external {
+    target.requestWithdrawal();
+  }
+
+  function executeWithdrawal() external {
+    target.executeWithdrawal();
+  }
+
+  receive() external payable {
+    // Try to re-deposit during ETH receive callback
+    target.deposit{value: msg.value}(beneficiary);
+  }
+}
+
 /// @dev Contract that attempts reentrancy on executeWithdrawal.
 contract ReentrantWithdrawer {
   Escrow public target;
