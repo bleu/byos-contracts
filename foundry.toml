@@ -2,6 +2,11 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+remappings = [
+  "@openzeppelin/=lib/openzeppelin-contracts/",
+  "contracts/=src/contracts/",
+  "interfaces/=src/interfaces/",
+]
 
 # Compiler settings
 solc = "0.8.30"

@@ -8,8 +8,11 @@ import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
  * @author CoW Protocol Developers
  * @notice Per-chain, native-token escrow holding sub-solver collateral keyed by sub-solver
  * address. Anyone may deposit; the sub-solver withdraws subject to a cooldown.
- * The operator holds exclusive debit authority for revert penalties (Track A)
- * and EBBO passthrough (Track B). Debited funds are swept to the owner.
+ * The operator (OPERATOR_ROLE) holds exclusive debit authority for revert penalties
+ * (Track A) and EBBO passthrough (Track B). Debited funds are swept to the default admin.
+ * Access control is provided by OpenZeppelin's AccessControlDefaultAdminRules:
+ * the default admin manages roles and contract parameters, while the OPERATOR_ROLE
+ * is granted to the automated BYOS service EOA.
  */
 interface IEscrow {
   /*///////////////////////////////////////////////////////////////
@@ -51,14 +54,7 @@ interface IEscrow {
   event Unfrozen(address indexed _subSolver);
 
   /**
-   * @notice The operator address has been replaced
-   * @param _oldOperator The previous operator
-   * @param _newOperator The new operator
-   */
-  event OperatorUpdated(address indexed _oldOperator, address indexed _newOperator);
-
-  /**
-   * @notice Accumulated debits have been swept to the owner
+   * @notice Accumulated debits have been swept to the default admin
    * @param _to The recipient of the sweep
    * @param _amount The swept amount
    */
@@ -83,33 +79,9 @@ interface IEscrow {
    */
   event CooldownPeriodUpdated(uint256 _oldPeriod, uint256 _newPeriod);
 
-  /**
-   * @notice A two-step ownership transfer has been started
-   * @param _previousOwner The current owner
-   * @param _newOwner The pending owner that must accept the transfer
-   */
-  event OwnershipTransferStarted(address indexed _previousOwner, address indexed _newOwner);
-
-  /**
-   * @notice A pending ownership transfer has been accepted
-   * @param _previousOwner The previous owner
-   * @param _newOwner The new owner
-   */
-  event OwnershipTransferred(address indexed _previousOwner, address indexed _newOwner);
-
   /*///////////////////////////////////////////////////////////////
                               ERRORS
   //////////////////////////////////////////////////////////////*/
-
-  /**
-   * @notice Throws if the function was called by someone else than the owner
-   */
-  error Escrow_OnlyOwner();
-
-  /**
-   * @notice Throws if the function was called by someone else than the operator
-   */
-  error Escrow_OnlyOperator();
 
   /**
    * @notice Throws if the sub-solver's balance is insufficient for the operation
@@ -142,23 +114,25 @@ interface IEscrow {
   error Escrow_WithdrawalAlreadyRequested();
 
   /**
-   * @notice Throws if a required address argument is the zero address
-   */
-  error Escrow_ZeroAddress();
-
-  /**
    * @notice Throws if there is nothing to withdraw
    */
   error Escrow_NothingToWithdraw();
 
   /**
-   * @notice Throws if the function was called by someone else than the pending owner
+   * @notice Throws if a required address parameter is the zero address
    */
-  error Escrow_OnlyPendingOwner();
+  error Escrow_ZeroAddress();
 
   /*///////////////////////////////////////////////////////////////
                              VARIABLES
   //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Role identifier for the operator (automated BYOS service EOA)
+   * @return _operatorRole The keccak256 hash of "OPERATOR_ROLE"
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function OPERATOR_ROLE() external view returns (bytes32 _operatorRole);
 
   /**
    * @notice Returns the current balance of a sub-solver (increased by deposits, decreased by debits)
@@ -188,31 +162,13 @@ interface IEscrow {
   ) external view returns (bool _isFrozen);
 
   /**
-   * @notice Returns the contract owner, which receives debited funds and can configure parameters
-   * @return _owner The owner address
-   */
-  function owner() external view returns (address _owner);
-
-  /**
-   * @notice Returns the address that must call acceptOwnership to finalize a transfer
-   * @return _pendingOwner The pending owner address
-   */
-  function pendingOwner() external view returns (address _pendingOwner);
-
-  /**
-   * @notice Returns the automated EOA used by the BYOS service for debit/freeze operations
-   * @return _operator The operator address
-   */
-  function operator() external view returns (address _operator);
-
-  /**
    * @notice Returns the seconds a sub-solver must wait between requestWithdrawal and executeWithdrawal
    * @return _cooldownPeriod The cooldown period in seconds
    */
   function cooldownPeriod() external view returns (uint256 _cooldownPeriod);
 
   /**
-   * @notice Returns the debit pool not yet swept to the owner via withdrawDebits
+   * @notice Returns the debit pool not yet swept to the default admin via withdrawDebits
    * @return _accumulatedDebits The accumulated debit amount
    */
   function accumulatedDebits() external view returns (uint256 _accumulatedDebits);
@@ -229,15 +185,8 @@ interface IEscrow {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Replaces the operator address
-   * @param _newOperator The new operator address
-   */
-  function setOperator(
-    address _newOperator
-  ) external;
-
-  /**
    * @notice Updates the withdrawal cooldown period
+   * @dev Only callable by the default admin
    * @param _period The new cooldown period in seconds
    */
   function setCooldownPeriod(
@@ -245,23 +194,9 @@ interface IEscrow {
   ) external;
 
   /**
-   * @notice Starts a two-step ownership transfer
-   * @dev The new owner must call acceptOwnership; calling again overrides any pending transfer
-   * @param _newOwner The proposed new owner
-   */
-  function transferOwnership(
-    address _newOwner
-  ) external;
-
-  /**
-   * @notice Accepts a pending ownership transfer
-   * @dev Only callable by the pending owner
-   */
-  function acceptOwnership() external;
-
-  /**
    * @notice Debits a sub-solver's balance
-   * @dev Used for revert penalties (Track A) and EBBO passthrough (Track B)
+   * @dev Used for revert penalties (Track A) and EBBO passthrough (Track B).
+   * Only callable by accounts with OPERATOR_ROLE.
    * @param _subSolver The sub-solver whose balance to debit
    * @param _amount The amount to debit in native token
    * @param _reason An identifier for the debit (e.g. tx hash for Track A, claim ID for Track B)
@@ -274,7 +209,7 @@ interface IEscrow {
 
   /**
    * @notice Freezes a sub-solver, blocking withdrawal execution
-   * @dev Used during Track B investigations
+   * @dev Used during Track B investigations. Only callable by accounts with OPERATOR_ROLE.
    * @param _subSolver The sub-solver to freeze
    */
   function freeze(
@@ -283,6 +218,7 @@ interface IEscrow {
 
   /**
    * @notice Unfreezes a sub-solver, allowing pending withdrawals to proceed
+   * @dev Only callable by accounts with OPERATOR_ROLE
    * @param _subSolver The sub-solver to unfreeze
    */
   function unfreeze(
@@ -319,7 +255,7 @@ interface IEscrow {
   ) external payable;
 
   /**
-   * @notice Sweeps accumulated debits to the owner
+   * @notice Sweeps accumulated debits to the default admin
    * @dev Callable by anyone
    */
   function withdrawDebits() external;
@@ -344,7 +280,7 @@ interface IEscrow {
   ) external view returns (uint256 _effectiveBalance);
 
   /**
-   * @notice Returns the amount of accumulated debits available for owner withdrawal
+   * @notice Returns the amount of accumulated debits available for default admin withdrawal
    * @return _withdrawableBalance The withdrawable debit amount
    */
   function withdrawableBalance() external view returns (uint256 _withdrawableBalance);
