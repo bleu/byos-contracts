@@ -6,7 +6,7 @@ The stable domain language for the **Bring Your Own Solver (BYOS)** project, sco
 
 A **bonded CoW solver** whose proposed solutions are sourced from a permissionless set of **external sub-solvers**. Sub-solvers submit signed routing proposals against specific order UIDs, collateralized by an escrow balance held by BYOS. BYOS retains exclusive control over on-chain settlement submission. From the protocol's perspective BYOS is a single, ordinary bonded solver — the sub-solver relationship is entirely internal to BYOS.
 
-This repo holds the on-chain half of that design: the **Escrow** (implemented, [`src/contracts/Escrow.sol`](src/contracts/Escrow.sol)) and the **Trampoline** (specified in ADRs, not yet implemented). The off-chain BYOS service — proposal API, solver engine, gatekeeping, monitoring — lives in a separate repo and is out of scope here.
+This repo holds the on-chain half of that design: the **Escrow** ([`src/contracts/Escrow.sol`](src/contracts/Escrow.sol)) and the **Trampoline** ([`src/contracts/Trampoline.sol`](src/contracts/Trampoline.sol), deployed per sub-solver by [`src/contracts/TrampolineFactory.sol`](src/contracts/TrampolineFactory.sol)). The off-chain BYOS service — proposal API, solver engine, gatekeeping, monitoring — lives in a separate repo and is out of scope here.
 
 ## Glossary
 

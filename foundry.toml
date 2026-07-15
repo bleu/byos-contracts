@@ -9,12 +9,16 @@ remappings = [
 ]
 
 # Compiler settings
+solc = "0.8.30"
 via_ir = false
 optimizer = true
 optimizer_runs = 1000000
 evm_version = "cancun"
 
 deny = "warnings"
+# Vendored dependencies are not held to deny = "warnings" (e.g. newer solc
+# versions warn inside OpenZeppelin sources we don't control).
+ignored_warnings_from = ["lib"]
 
 [lint]
 exclude_lints = ["block-timestamp", "erc20-unchecked-transfer"]

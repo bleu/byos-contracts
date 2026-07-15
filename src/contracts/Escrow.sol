@@ -7,10 +7,14 @@ import {
 import {ERC20} from '@openzeppelin/contracts/token/ERC20/ERC20.sol';
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
+import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 
 contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
   /// @inheritdoc IEscrow
   bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
+
+  /// @inheritdoc IEscrow
+  ITrampolineFactory public immutable TRAMPOLINE_FACTORY;
 
   /// @inheritdoc IEscrow
   mapping(address _subSolver => uint256 _requestedAt) public withdrawalRequestedAt;
@@ -33,6 +37,7 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
    * @param _admin Secure wallet (e.g. multisig) that owns the contract; granted DEFAULT_ADMIN_ROLE
    * @param _operator EOA used by the BYOS service for automated debit/freeze operations; granted OPERATOR_ROLE
    * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
+   * @param _trampolineFactory Deployer of per-sub-solver Trampoline instances
    * @param _name ERC20 token name (e.g. "BYOS Escrow" or "BYOS Escrow (Gnosis)")
    * @param _symbol ERC20 token symbol (e.g. "BYOS")
    */
@@ -41,11 +46,14 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
     address _admin,
     address _operator,
     uint256 _cooldownPeriod,
+    ITrampolineFactory _trampolineFactory,
     string memory _name,
     string memory _symbol
   ) ERC20(_name, _symbol) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
+    if (address(_trampolineFactory) == address(0)) revert Escrow_ZeroAddress();
     _grantRole(OPERATOR_ROLE, _operator);
     cooldownPeriod = _cooldownPeriod;
+    TRAMPOLINE_FACTORY = _trampolineFactory;
   }
 
   // --- ERC20 overrides ---
@@ -202,10 +210,9 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
   function deposit(
     address _subSolver
   ) external payable {
-    // TODO: deploy the sub-solver's Trampoline instance via the factory on first
-    // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
     if (msg.value == 0) revert Escrow_ZeroValue();
     _mint(_subSolver, msg.value);
+    TRAMPOLINE_FACTORY.ensureDeployed(_subSolver);
     emit Deposited(_subSolver, msg.value);
   }
 

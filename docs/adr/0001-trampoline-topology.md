@@ -166,8 +166,10 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
 
 Since acceptance, the first two forks were settled by
 [ADR-0005](0005-trampoline-execution-authority.md): execution is signature-gated and the
-payload is raw interactions. The upgrade-key posture remains open. The original flags
-are preserved below.
+payload is raw interactions. The upgrade-key posture was settled with the
+implementation: immutable full contracts per instance, deployed by the factory, with no
+proxy and no privileged key ([`Trampoline.sol`](../../src/contracts/Trampoline.sol)).
+The original flags are preserved below.
 
 - Execution authority: signature-gated versus BYOS-unilateral. The recommendation is
   signature-gated, so the reverted tx self-evidences exactly what the sub-solver

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
+
 /**
  * @title BYOS Escrow
  * @author CoW Protocol Developers
@@ -161,6 +163,11 @@ interface IEscrow {
    */
   error Escrow_NoAdmin();
 
+  /**
+   * @notice Throws if a required address parameter is the zero address
+   */
+  error Escrow_ZeroAddress();
+
   /*///////////////////////////////////////////////////////////////
                              VARIABLES
   //////////////////////////////////////////////////////////////*/
@@ -207,6 +214,13 @@ interface IEscrow {
    * @return _paused True if the contract is paused
    */
   function paused() external view returns (bool _paused);
+
+  /**
+   * @notice Returns the factory that deploys a sub-solver's Trampoline on first deposit (ADR-0003)
+   * @return _trampolineFactory The Trampoline factory
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function TRAMPOLINE_FACTORY() external view returns (ITrampolineFactory _trampolineFactory);
 
   /*///////////////////////////////////////////////////////////////
                                LOGIC
@@ -290,6 +304,8 @@ interface IEscrow {
   /**
    * @notice Deposits native token into a sub-solver's escrow balance (mints ERC20 tokens 1:1)
    * @dev Reverts on zero-value deposits. Blocked if the receiver has a pending withdrawal.
+   * The first deposit for a sub-solver also deploys its Trampoline instance, so the
+   * deploy gas is paid by the depositing party (ADR-0003, deploy-at-deposit-time).
    * @param _subSolver The sub-solver address to credit
    */
   function deposit(

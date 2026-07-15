@@ -10,6 +10,7 @@ import {IEscrow} from 'interfaces/IEscrow.sol';
 
 import {EscrowTestBase} from './EscrowTestBase.sol';
 import {Escrow} from 'contracts/Escrow.sol';
+import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
 contract AccessControlTest is EscrowTestBase {
   // --- Constructor ---
@@ -20,13 +21,19 @@ contract AccessControlTest is EscrowTestBase {
     assertEq(escrow.defaultAdmin(), admin);
     assertEq(escrow.defaultAdminDelay(), ADMIN_TRANSFER_DELAY);
     assertEq(escrow.cooldownPeriod(), COOLDOWN);
+    assertEq(address(escrow.TRAMPOLINE_FACTORY()), address(factory));
   }
 
   function test_constructor_reverts_zero_admin() public {
     vm.expectRevert(
       abi.encodeWithSelector(IAccessControlDefaultAdminRules.AccessControlInvalidDefaultAdmin.selector, address(0))
     );
-    new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, COOLDOWN, 'BYOS Escrow', 'BYOS');
+    new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, COOLDOWN, factory, 'BYOS Escrow', 'BYOS');
+  }
+
+  function test_constructor_reverts_zero_factory() public {
+    vm.expectRevert(IEscrow.Escrow_ZeroAddress.selector);
+    new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN, TrampolineFactory(address(0)), 'BYOS Escrow', 'BYOS');
   }
 
   // --- Admin functions ---
