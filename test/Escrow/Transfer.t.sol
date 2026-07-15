@@ -74,6 +74,49 @@ contract TransferTest is EscrowTestBase {
     assertEq(escrow.balanceOf(subSolver), 10 ether);
   }
 
+  function test_transfer_deploys_trampoline_for_recipient() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    address newAddr = makeAddr('newAddr');
+    address predicted = factory.addressOf(newAddr);
+    assertEq(predicted.code.length, 0);
+
+    vm.prank(subSolver);
+    escrow.transfer(newAddr, 3 ether);
+
+    assertGt(predicted.code.length, 0);
+  }
+
+  function test_transfer_to_existing_trampoline_is_idempotent() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    escrow.deposit{value: 5 ether}(subSolver2);
+
+    address predicted = factory.addressOf(subSolver2);
+    assertGt(predicted.code.length, 0);
+
+    vm.prank(subSolver);
+    escrow.transfer(subSolver2, 3 ether);
+
+    assertEq(escrow.balanceOf(subSolver2), 8 ether);
+    assertGt(predicted.code.length, 0);
+  }
+
+  function test_key_rotation_deploys_trampoline_for_new_key() public {
+    address oldKey = makeAddr('oldKey');
+    address newKey = makeAddr('newKey');
+
+    escrow.deposit{value: 10 ether}(oldKey);
+
+    address predicted = factory.addressOf(newKey);
+    assertEq(predicted.code.length, 0);
+
+    vm.prank(oldKey);
+    escrow.transfer(newKey, 10 ether);
+
+    assertGt(predicted.code.length, 0);
+    assertEq(escrow.balanceOf(newKey), 10 ether);
+  }
+
   function test_key_rotation_via_transfer() public {
     address oldKey = makeAddr('oldKey');
     address newKey = makeAddr('newKey');
