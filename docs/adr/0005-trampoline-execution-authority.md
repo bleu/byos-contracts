@@ -44,6 +44,33 @@ Why not BYOS-unilateral:
 - Aligns with cow-shed (`cowdao-grants/cow-shed`), which implements the same pattern: a
   per-user, signature-gated, CREATE2 proxy with revert bubbling.
 
+### Submitter gating: `tx.origin` must hold the Escrow's SUBMITTER_ROLE
+
+The `msg.sender == GPv2Settlement` check alone does not establish *which solver*
+submitted the settlement. Once BYOS settles a proposal, its signature and route are
+public calldata, and while `validUntil` is live any other allow-listed CoW solver can
+carry a replayed `execute` in its own settlement — or front-run the original if it is
+visible in a public mempool. A replayed route that produces less than `buyAmount` pays
+the difference out of the instance's residue into the attacker's settlement buffer,
+where CoW slippage accounting credits it to them. Bounded (only residue is reachable),
+but real.
+
+`execute` therefore additionally requires `tx.origin` to hold the Escrow's
+`SUBMITTER_ROLE`. `tx.origin` is the right identity signal here: GPv2Settlement exposes
+no "current solver" context on-chain, CoW solvers submit `settle()` from an EOA that is
+both `msg.sender` to the settlement and `tx.origin`, and EIP-7702 delegation preserves
+`tx.origin`. The classic `tx.origin` caveats (contract wallets, ERC-4337) don't apply
+because BYOS controls its own submission path.
+
+The allowed-submitter set lives on the Escrow as a role rather than as an immutable
+address because submitter rotation is a realistic event (key hygiene, multiple
+submission EOAs), and an immutable address would make rotation cascade: new factory →
+new EIP-712 domain (all outstanding signatures invalid) → new trampoline addresses →
+new Escrow. Role management is `DEFAULT_ADMIN_ROLE` only (the Owner multisig), so the
+operator's grief-only threat model is unchanged. To break the resulting circular
+constructor dependency, the Escrow deploys the factory from its own constructor:
+Escrow, factory, and EIP-712 domain form one deployment generation.
+
 ### EIP-712 typed-data schema
 
 ```solidity
@@ -89,18 +116,22 @@ Eip712Domain {
 instances. It is a natural singleton per chain, per deployment generation. Binding to
 the factory cleanly separates contract generations (v1 factory signatures don't verify
 against v2). Trampoline instances can hardcode or inherit the factory address (deployed
-by it), making on-chain verification straightforward.
+by it), making on-chain verification straightforward. The factory itself is deployed by
+the Escrow's constructor (see submitter gating above), so a generation is anchored by
+its Escrow.
 
 ### Nonce semantics: unique salt, no enforcement
 
 The nonce is a unique salt that makes each proposal's EIP-712 hash distinct. No ordering
 or uniqueness enforcement, either on-chain (trampoline) or off-chain (BYOS).
 
-Replay of a settled proposal is prevented by `GPv2Settlement`'s fill tracking (a filled
-order can't be settled again). Replaying a reverted proposal would revert again.
-`validUntil` bounds the time window and is enforced on-chain: `execute` reverts once it
-has passed. Keeping the trampoline storage-free (no nonce mapping) preserves the
-immutable, minimal contract design.
+Fill tracking alone does not prevent replay of `execute`: a settlement need not include
+the order at all, so a third party could re-run a live proposal in a tradeless
+settlement (the COW-1151 attack). Third-party replay is instead blocked by the
+submitter gate above. Replay by BYOS's own submitter remains possible by design — BYOS
+is trusted not to resubmit, `validUntil` bounds the window and is enforced on-chain,
+and a filled order can't be settled again. Keeping the trampoline storage-free (no
+nonce mapping) preserves the immutable, minimal contract design.
 
 ### Proposal payload shape: raw interactions
 
@@ -126,9 +157,23 @@ reject at gatekeeping, never patch.
   key, collateral from another. Rejected for v1 — complicates the escrow contract, and
   signer == escrow key is the cleanest invariant. Delegation is a v2 concern.
 - **Monotonic on-chain nonce (trampoline stores nonce mapping).** Strongest replay
-  protection, but adds storage writes to the trampoline. Rejected — replay is already
-  prevented by order fill tracking and `validUntil`; keeping the trampoline storage-free
-  is more valuable.
+  protection, but adds storage writes to the trampoline. Rejected — third-party replay
+  is blocked by the submitter gate, BYOS-side replay is bounded by `validUntil` and
+  fill tracking; keeping the trampoline storage-free is more valuable.
+- **Executed-digest mapping instead of submitter gating.** Mark each proposal digest on
+  first execution; replays revert. Keyless, but adds an SSTORE per settlement and does
+  not stop a rival solver front-running the original settlement from a public mempool —
+  the gate closes both. Rejected.
+- **BYOS co-signature on execute.** A second EIP-712 signature from a BYOS key becomes
+  public calldata itself and is equally replayable unless paired with storage. Rejected
+  — key management without closing the hole.
+- **Immutable submitter address (in factory or instances).** Purest no-key posture, but
+  submitter rotation would force redeploying the whole generation, including the Escrow
+  and every sub-solver's collateral cycle. Rejected.
+- **Factory-held submitter allowlist.** Equivalent power to the Escrow role, but adds a
+  second admin surface next to the Escrow's existing `AccessControlDefaultAdminRules`.
+  Rejected in favor of one admin surface; the Escrow deploys the factory to avoid the
+  circular constructor dependency.
 - **Structured routes instead of raw interactions.** BYOS encodes every low-level call,
   can forbid sub-solver approvals entirely. Rejected — kills any-DEX generality,
   requires BYOS to maintain a venue registry, bottlenecks sub-solver innovation.
@@ -146,3 +191,12 @@ reject at gatekeeping, never patch.
 - **The signature address is load-bearing three ways.** One address is the proposal
   signer, the escrow key, and the Trampoline CREATE2 salt. Rotating a sub-solver key
   means a new escrow deposit and a new trampoline instance.
+- **BYOS must submit settlements directly from EOAs holding SUBMITTER_ROLE.** The
+  `tx.origin` gate ties submission to keys the Owner has granted; a submission path
+  where the originating EOA is not the granted key (e.g. a third-party relayer signing
+  with its own key) would fail the gate. Rotation is a `grantRole`/`revokeRole` on the
+  Escrow, not a redeploy.
+- **Trampoline execution now reads Escrow state.** The instances are no longer
+  dependency-free: `execute` performs two staticcalls into the Escrow per settlement
+  (role id + role check), and a compromised Owner could block settlements by revoking
+  all submitters — no worse than the pre-existing Owner trust.

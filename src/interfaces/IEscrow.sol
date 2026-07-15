@@ -135,6 +135,14 @@ interface IEscrow {
   function OPERATOR_ROLE() external view returns (bytes32 _operatorRole);
 
   /**
+   * @notice Role identifier for settlement submitters (EOAs the BYOS service submits
+   * settlements from); Trampoline.execute requires tx.origin to hold this role
+   * @return _submitterRole The keccak256 hash of "SUBMITTER_ROLE"
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function SUBMITTER_ROLE() external view returns (bytes32 _submitterRole);
+
+  /**
    * @notice Returns the current balance of a sub-solver (increased by deposits, decreased by debits)
    * @param _subSolver The sub-solver to query
    * @return _balance The sub-solver's current balance

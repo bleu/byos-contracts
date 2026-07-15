@@ -29,6 +29,7 @@ Two distinct roles with separated concerns:
 
 - **Owner** — a secure wallet (e.g., multisig/Safe) that owns the contract. Can set the operator, configure parameters (cooldown period), transfer ownership, and withdraw accumulated debits. All debited funds flow to the owner. Ownership transfer is two-step: owner calls `transferOwnership(newOwner)` to nominate a `pendingOwner`, then the pending owner calls `acceptOwnership()` to finalize. This prevents irrecoverable loss from address typos.
 - **Operator** — an EOA that sits in the BYOS service for automated operation. Can debit sub-solvers, freeze, and unfreeze. Cannot withdraw funds or change configuration.
+- **Submitter** (`SUBMITTER_ROLE`) — the EOA(s) the BYOS service submits settlements from. Holds no escrow authority at all; the role exists because `Trampoline.execute` requires `tx.origin` to hold it ([ADR-0005](0005-trampoline-execution-authority.md)), making the Escrow the submitter registry for its contract generation. Granted and revoked by the owner only — giving the operator this power would let a compromised operator authorize a rogue submitter to skim trampoline residue, upgrading its blast radius beyond griefing.
 
 **Why separate?** The operator's private key is more exposed (lives in the BYOS service). If compromised, the attacker can debit sub-solver balances — but those funds go to the owner, not the attacker. The owner (cold wallet) can replace a compromised operator immediately. This limits the blast radius of a key compromise to griefing (illegitimate debits), not theft.
 
@@ -64,9 +65,11 @@ The 5× multiplier is a BYOS service parameter, tunable without contract changes
 
 `withdrawDebits()` is callable by anyone — funds always go to the owner address. Enables automated sweeping by keepers or the BYOS service itself without requiring the owner's cold wallet to sign.
 
-### Deployment: immutable
+### Deployment: immutable, deploys the Trampoline factory
 
 Simple, non-upgradeable contract. No proxy pattern. Immutability is a trust signal for sub-solvers — the code they deposit into won't change. If a v2 is needed, deploy a new contract; the cooldown-based withdrawal makes migration straightforward.
+
+The Escrow's constructor deploys the Trampoline factory itself (taking the GPv2Settlement address instead of a factory address). Trampoline instances bind to the Escrow as their submitter registry, and the factory needs the Escrow address before the Escrow could otherwise exist — self-deployment breaks that cycle without keys or precomputed addresses ([ADR-0005](0005-trampoline-execution-authority.md)). Escrow, factory, and EIP-712 domain thus form one deployment generation; a v2 Escrow means a v2 factory and domain.
 
 ### No on-chain dispute mechanisms
 

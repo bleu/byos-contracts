@@ -8,9 +8,14 @@ import {
 import {IEscrow} from 'interfaces/IEscrow.sol';
 import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 
+import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
+
 contract Escrow is AccessControlDefaultAdminRules, IEscrow {
   /// @inheritdoc IEscrow
   bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
+
+  /// @inheritdoc IEscrow
+  bytes32 public constant SUBMITTER_ROLE = keccak256('SUBMITTER_ROLE');
 
   /// @inheritdoc IEscrow
   ITrampolineFactory public immutable TRAMPOLINE_FACTORY;
@@ -31,24 +36,30 @@ contract Escrow is AccessControlDefaultAdminRules, IEscrow {
   uint256 public accumulatedDebits;
 
   /**
-   * @notice Sets the initial roles and withdrawal cooldown
+   * @notice Sets the initial roles and withdrawal cooldown, and deploys the Trampoline factory
+   * @dev The Escrow deploys the factory itself so trampolines can bind to this Escrow as
+   * their submitter registry without a circular constructor dependency; Escrow, factory,
+   * and EIP-712 domain form one deployment generation (ADR-0005)
    * @param _adminTransferDelay Seconds the default-admin transfer must wait before acceptance
    * @param _admin Secure wallet (e.g. multisig) that owns the contract; granted DEFAULT_ADMIN_ROLE
    * @param _operator EOA used by the BYOS service for automated debit/freeze operations; granted OPERATOR_ROLE
+   * @param _submitter EOA the BYOS service submits settlements from; granted SUBMITTER_ROLE
    * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
-   * @param _trampolineFactory Deployer of per-sub-solver Trampoline instances
+   * @param _settlement GPv2Settlement address baked into the factory and its instances
    */
   constructor(
     uint48 _adminTransferDelay,
     address _admin,
     address _operator,
+    address _submitter,
     uint256 _cooldownPeriod,
-    ITrampolineFactory _trampolineFactory
+    address _settlement
   ) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
-    if (address(_trampolineFactory) == address(0)) revert Escrow_ZeroAddress();
+    if (_settlement == address(0)) revert Escrow_ZeroAddress();
     _grantRole(OPERATOR_ROLE, _operator);
+    _grantRole(SUBMITTER_ROLE, _submitter);
     cooldownPeriod = _cooldownPeriod;
-    TRAMPOLINE_FACTORY = _trampolineFactory;
+    TRAMPOLINE_FACTORY = new TrampolineFactory(_settlement);
   }
 
   /// @inheritdoc IEscrow

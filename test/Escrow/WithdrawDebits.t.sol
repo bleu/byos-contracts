@@ -48,7 +48,8 @@ contract WithdrawDebitsTest is EscrowTestBase {
 
   function test_withdraw_debits_reverts_if_admin_rejects_eth() public {
     RejectETH rejector = new RejectETH();
-    Escrow escrowBadAdmin = new Escrow(ADMIN_TRANSFER_DELAY, address(rejector), op, COOLDOWN, factory);
+    Escrow escrowBadAdmin =
+      new Escrow(ADMIN_TRANSFER_DELAY, address(rejector), op, submitter, COOLDOWN, makeAddr('settlement'));
     escrowBadAdmin.deposit{value: 10 ether}(subSolver);
 
     vm.prank(op);

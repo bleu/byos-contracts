@@ -6,6 +6,7 @@ import {Test} from 'forge-std/Test.sol';
 
 import {BUY_ETH_ADDRESS, ITrampoline} from 'interfaces/ITrampoline.sol';
 
+import {Escrow} from 'contracts/Escrow.sol';
 import {Trampoline} from 'contracts/Trampoline.sol';
 import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
@@ -16,9 +17,11 @@ import {TestERC20} from '../mocks/TestERC20.sol';
 import {ProposalSigning} from '../utils/ProposalSigning.sol';
 
 contract TrampolineTest is Test {
+  Escrow escrow;
   TrampolineFactory factory;
   Trampoline trampoline;
   address settlement;
+  address submitter;
   address subSolver;
   uint256 subSolverKey;
 
@@ -31,8 +34,10 @@ contract TrampolineTest is Test {
 
   function setUp() public {
     settlement = makeAddr('settlement');
+    submitter = makeAddr('submitter');
     (subSolver, subSolverKey) = makeAddrAndKey('subSolver');
-    factory = new TrampolineFactory(settlement);
+    escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), submitter, 1 days, settlement);
+    factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
     trampoline = Trampoline(payable(factory.ensureDeployed(subSolver)));
 
     sellToken = new TestERC20();
@@ -88,7 +93,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(buyToken), signature);
 
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
@@ -108,6 +113,55 @@ contract TrampolineTest is Test {
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
 
+  function test_execute_reverts_when_tx_origin_not_a_submitter() public {
+    // The COW-1151 replay: once BYOS settles a proposal its signature and route are
+    // public calldata, and another allow-listed CoW solver carries the same execute
+    // in its own settlement. msg.sender is still GPv2Settlement, but the tx
+    // originates from the rival solver, which holds no SUBMITTER_ROLE.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, makeAddr('rivalSolver'));
+    vm.expectRevert(ITrampoline.Trampoline_UnauthorizedSubmitter.selector);
+    trampoline.execute(proposal, route, address(buyToken), signature);
+  }
+
+  function test_execute_reverts_after_submitter_revoked() public {
+    // Submitter rotation is a role change on the Escrow, not a redeploy: once the
+    // admin revokes the key, settlements it originates stop passing the gate.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    bytes32 submitterRole = escrow.SUBMITTER_ROLE();
+    vm.prank(escrow.defaultAdmin());
+    escrow.revokeRole(submitterRole, submitter);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_UnauthorizedSubmitter.selector);
+    trampoline.execute(proposal, route, address(buyToken), signature);
+  }
+
+  function test_execute_accepts_newly_granted_submitter() public {
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    address newSubmitter = makeAddr('newSubmitter');
+    bytes32 submitterRole = escrow.SUBMITTER_ROLE();
+    vm.prank(escrow.defaultAdmin());
+    escrow.grantRole(submitterRole, newSubmitter);
+
+    vm.prank(settlement, newSubmitter);
+    trampoline.execute(proposal, route, address(buyToken), signature);
+
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
   function test_execute_reverts_when_proposal_expired() public {
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
@@ -116,7 +170,7 @@ contract TrampolineTest is Test {
 
     vm.warp(proposal.validUntil + 1);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_ProposalExpired.selector);
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -130,7 +184,7 @@ contract TrampolineTest is Test {
     (, uint256 wrongKey) = makeAddrAndKey('mallory');
     bytes memory signature = _sign(wrongKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -144,7 +198,7 @@ contract TrampolineTest is Test {
 
     ITrampoline.Interaction[] memory substituted = _swapRoute(BUY_AMOUNT + 1);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
     trampoline.execute(proposal, substituted, address(buyToken), signature);
   }
@@ -157,7 +211,7 @@ contract TrampolineTest is Test {
 
     proposal.buyAmount = BUY_AMOUNT - 10 ether;
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -171,7 +225,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     // The settle-back transfer's own insufficient-balance revert is the guard.
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert();
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -183,7 +237,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(buyToken), signature);
 
     // Exactly buyAmount settles back; surplus stays in the instance (no sweep).
@@ -201,7 +255,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(Reverter.Boom.selector, 42));
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -223,7 +277,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, BUY_ETH_ADDRESS, signature);
 
     assertEq(settlement.balance, BUY_AMOUNT);
@@ -243,7 +297,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(weth), signature);
 
     assertEq(weth.balanceOf(settlement), BUY_AMOUNT);
@@ -253,16 +307,17 @@ contract TrampolineTest is Test {
   // --- Replay ---
 
   function test_execute_accepts_replayed_proposal_by_design() public {
-    // The trampoline is deliberately stateless (no nonce mapping, ADR-0005): replay
-    // of a settled proposal is prevented upstream by GPv2's order fill tracking,
-    // not here. This test pins that documented behavior.
+    // The trampoline is deliberately stateless (no nonce mapping, ADR-0005): a live
+    // proposal replayed by an authorized BYOS submitter executes again. Third-party
+    // replay is blocked by the submitter gate; BYOS itself is trusted not to
+    // resubmit, and validUntil bounds the window. This test pins that behavior.
     ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     for (uint256 i = 0; i < 2; i++) {
       sellToken.mint(address(trampoline), SELL_AMOUNT);
-      vm.prank(settlement);
+      vm.prank(settlement, submitter);
       trampoline.execute(proposal, route, address(buyToken), signature);
     }
 
@@ -285,7 +340,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     // The inner execute rejects the trampoline as caller; the revert bubbles up.
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_OnlySettlement.selector);
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -301,7 +356,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_OnlySettlement.selector);
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
@@ -324,7 +379,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.buyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(buyToken), signature);
 
     // The approval stands (approvals are not reset, ADR-0001) but instance A is
@@ -344,9 +399,10 @@ contract TrampolineTest is Test {
   // --- EIP-712 domain separation ---
 
   function test_signature_from_other_factory_generation_fails() public {
-    // A factory redeployment (v2) is a new EIP-712 domain: signatures against the
-    // v1 factory must not verify on a v2 instance (ADR-0005).
-    TrampolineFactory factory2 = new TrampolineFactory(settlement);
+    // An escrow redeployment (v2) brings a new factory and a new EIP-712 domain:
+    // signatures against the v1 factory must not verify on a v2 instance (ADR-0005).
+    Escrow escrow2 = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), submitter, 1 days, settlement);
+    TrampolineFactory factory2 = TrampolineFactory(address(escrow2.TRAMPOLINE_FACTORY()));
     Trampoline instance2 = Trampoline(payable(factory2.ensureDeployed(subSolver)));
     assertTrue(address(instance2) != address(trampoline));
 
@@ -356,7 +412,7 @@ contract TrampolineTest is Test {
     // Signed against the v1 factory's domain separator (the _sign helper).
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
     instance2.execute(proposal, route, address(buyToken), signature);
   }

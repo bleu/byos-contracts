@@ -69,6 +69,12 @@ interface ITrampoline {
   error Trampoline_OnlySettlement();
 
   /**
+   * @notice Throws if the settlement was not submitted by an authorized BYOS submitter
+   * (tx.origin lacks the Escrow's SUBMITTER_ROLE)
+   */
+  error Trampoline_UnauthorizedSubmitter();
+
+  /**
    * @notice Throws if the proposal's validUntil timestamp has passed
    */
   error Trampoline_ProposalExpired();
@@ -108,6 +114,14 @@ interface ITrampoline {
   // solhint-disable-next-line func-name-mixedcase
   function DOMAIN_SEPARATOR() external view returns (bytes32 _domainSeparator);
 
+  /**
+   * @notice Returns the Escrow acting as submitter registry: execute requires tx.origin
+   * to hold its SUBMITTER_ROLE
+   * @return _escrow The Escrow address
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function ESCROW() external view returns (address _escrow);
+
   /*///////////////////////////////////////////////////////////////
                                LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -115,9 +129,12 @@ interface ITrampoline {
   /**
    * @notice Executes a sub-solver's signed route and settles back exactly
    * `_proposal.buyAmount` of `_buyToken` to the settlement contract
-   * @dev The transfer's own insufficient-balance revert is the funding guard (ADR-0003):
-   * a route that falls short reverts the settlement. Surplus beyond buyAmount stays in
-   * the instance.
+   * @dev Callable only by the settlement contract, and only in a settlement submitted
+   * by a BYOS submitter: tx.origin must hold the Escrow's SUBMITTER_ROLE, since a live
+   * proposal's calldata is public and any allow-listed solver could otherwise replay it
+   * (ADR-0005). The transfer's own insufficient-balance revert is the funding guard
+   * (ADR-0003): a route that falls short reverts the settlement. Surplus beyond
+   * buyAmount stays in the instance.
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
    * @param _buyToken Token to settle back; supplied by BYOS from the order

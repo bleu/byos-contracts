@@ -31,6 +31,14 @@ interface ITrampolineFactory {
   // solhint-disable-next-line func-name-mixedcase
   function SETTLEMENT() external view returns (address _settlement);
 
+  /**
+   * @notice Returns the Escrow that deployed this factory, baked into every deployed
+   * instance as its submitter registry
+   * @return _escrow The Escrow address
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function ESCROW() external view returns (address _escrow);
+
   /*///////////////////////////////////////////////////////////////
                                LOGIC
   //////////////////////////////////////////////////////////////*/

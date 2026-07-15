@@ -69,9 +69,11 @@ trampoline logic. This is the same posture as the preventive approve-authoring l
 sub-solver supplies only the route.
 
 Access control: `execute` is callable only in a settlement context
-(`msg.sender == GPv2Settlement`) and additionally requires the sub-solver's EIP-712
-signature over the route, for non-repudiation
-([ADR-0005](0005-trampoline-execution-authority.md)).
+(`msg.sender == GPv2Settlement`), only in a settlement submitted by BYOS
+(`tx.origin` must hold the Escrow's SUBMITTER_ROLE — settlements are permissionless at
+the protocol level, and without this any allow-listed solver could replay a public
+proposal), and additionally requires the sub-solver's EIP-712 signature over the route,
+for non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
 
 Batching: the flow above is per-trade. A settlement carrying multiple orders from the
 same sub-solver repeats steps 1 and 2 per trade through the one `Trampoline_S`. Whether
@@ -97,7 +99,9 @@ and that BYOS's buffer is never net-drained by a sub-solver, so no separate `bal
 assertion is needed. Surplus the route produces beyond `buyAmount` stays in the isolated
 trampoline as residue; its disposition (collected by BYOS and coupled into collateral
 sizing, versus left as a sub-solver-reclaimable reward outside the collateral model) is
-an open question, not yet an ADR.
+an open question, not yet an ADR. Residue is not reachable by third parties: the
+submitter gate ([ADR-0005](0005-trampoline-execution-authority.md)) blocks rival
+solvers from replaying a proposal to skim it.
 
 ### Infra-failure attribution
 

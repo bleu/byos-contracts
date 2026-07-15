@@ -14,16 +14,15 @@ contract Deploy is Script {
     uint48 _adminTransferDelay = uint48(vm.envOr('ADMIN_TRANSFER_DELAY', uint256(2 days)));
     address _admin = vm.envAddress('ESCROW_ADMIN');
     address _operator = vm.envAddress('ESCROW_OPERATOR');
+    address _submitter = vm.envAddress('BYOS_SUBMITTER');
     uint256 _cooldownPeriod = vm.envOr('COOLDOWN_PERIOD', uint256(1 days));
     address _settlement = vm.envOr('SETTLEMENT', DEFAULT_SETTLEMENT);
 
     vm.startBroadcast();
 
-    TrampolineFactory _factory = new TrampolineFactory(_settlement);
-    console.log('TrampolineFactory deployed at:', address(_factory));
-
-    Escrow _escrow = new Escrow(_adminTransferDelay, _admin, _operator, _cooldownPeriod, _factory);
+    Escrow _escrow = new Escrow(_adminTransferDelay, _admin, _operator, _submitter, _cooldownPeriod, _settlement);
     console.log('Escrow deployed at:', address(_escrow));
+    console.log('TrampolineFactory deployed at:', address(_escrow.TRAMPOLINE_FACTORY()));
 
     vm.stopBroadcast();
   }
