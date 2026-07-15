@@ -58,38 +58,38 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
 
   // --- ERC20 overrides ---
 
-  /// @notice Transfers tokens and deploys a Trampoline for the recipient if needed.
+  /// @inheritdoc IEscrow
   function transfer(
     address _to,
     uint256 _value
-  ) public override returns (bool) {
+  ) public override(ERC20, IEscrow) returns (bool) {
     bool _success = super.transfer(_to, _value);
     TRAMPOLINE_FACTORY.ensureDeployed(_to);
     return _success;
   }
 
-  /// @notice Disabled. This token does not support allowances.
+  /// @inheritdoc IEscrow
   function approve(
     address,
     uint256
-  ) public pure override returns (bool) {
+  ) public pure override(ERC20, IEscrow) returns (bool) {
     revert Escrow_AllowancesDisabled();
   }
 
-  /// @notice Disabled. This token does not support third-party transfers.
+  /// @inheritdoc IEscrow
   function transferFrom(
     address,
     address,
     uint256
-  ) public pure override returns (bool) {
+  ) public pure override(ERC20, IEscrow) returns (bool) {
     revert Escrow_AllowancesDisabled();
   }
 
-  /// @notice Always returns 0. Allowances are disabled.
+  /// @inheritdoc IEscrow
   function allowance(
     address,
     address
-  ) public pure override returns (uint256) {
+  ) public pure override(ERC20, IEscrow) returns (uint256) {
     return 0;
   }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+
 import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 
 /**
@@ -17,7 +19,7 @@ import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
  * the default admin manages roles and contract parameters, while the OPERATOR_ROLE
  * is granted to the automated BYOS service EOA.
  */
-interface IEscrow {
+interface IEscrow is IERC20 {
   /*///////////////////////////////////////////////////////////////
                               EVENTS
   //////////////////////////////////////////////////////////////*/
@@ -225,6 +227,48 @@ interface IEscrow {
   /*///////////////////////////////////////////////////////////////
                                LOGIC
   //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Transfers tokens to `_to` and deploys a Trampoline instance for the recipient if needed
+   * @dev Blocked if paused, if either party is frozen, or if either party has a pending withdrawal.
+   * @param _to The recipient address
+   * @param _value The amount of tokens to transfer
+   * @return _success True if the transfer succeeded
+   */
+  function transfer(
+    address _to,
+    uint256 _value
+  ) external returns (bool _success);
+
+  /**
+   * @notice Disabled. This token does not support allowances.
+   * @dev Always reverts with Escrow_AllowancesDisabled.
+   */
+  function approve(
+    address _spender,
+    uint256 _value
+  ) external returns (bool);
+
+  /**
+   * @notice Disabled. This token does not support third-party transfers.
+   * @dev Always reverts with Escrow_AllowancesDisabled.
+   */
+  function transferFrom(
+    address _from,
+    address _to,
+    uint256 _value
+  ) external returns (bool);
+
+  /**
+   * @notice Always returns 0. Allowances are disabled.
+   * @param _owner The token owner (unused)
+   * @param _spender The spender (unused)
+   * @return _remaining Always 0
+   */
+  function allowance(
+    address _owner,
+    address _spender
+  ) external view returns (uint256 _remaining);
 
   /**
    * @notice Updates the withdrawal cooldown period
