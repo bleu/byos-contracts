@@ -6,10 +6,14 @@ import {
 } from '@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol';
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
+import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 
 contract Escrow is AccessControlDefaultAdminRules, IEscrow {
   /// @inheritdoc IEscrow
   bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
+
+  /// @inheritdoc IEscrow
+  ITrampolineFactory public immutable TRAMPOLINE_FACTORY;
 
   /// @inheritdoc IEscrow
   mapping(address _subSolver => uint256 _balance) public balances;
@@ -32,15 +36,19 @@ contract Escrow is AccessControlDefaultAdminRules, IEscrow {
    * @param _admin Secure wallet (e.g. multisig) that owns the contract; granted DEFAULT_ADMIN_ROLE
    * @param _operator EOA used by the BYOS service for automated debit/freeze operations; granted OPERATOR_ROLE
    * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
+   * @param _trampolineFactory Deployer of per-sub-solver Trampoline instances
    */
   constructor(
     uint48 _adminTransferDelay,
     address _admin,
     address _operator,
-    uint256 _cooldownPeriod
+    uint256 _cooldownPeriod,
+    ITrampolineFactory _trampolineFactory
   ) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
+    if (address(_trampolineFactory) == address(0)) revert Escrow_ZeroAddress();
     _grantRole(OPERATOR_ROLE, _operator);
     cooldownPeriod = _cooldownPeriod;
+    TRAMPOLINE_FACTORY = _trampolineFactory;
   }
 
   /// @inheritdoc IEscrow
@@ -120,9 +128,8 @@ contract Escrow is AccessControlDefaultAdminRules, IEscrow {
   function deposit(
     address _subSolver
   ) external payable {
-    // TODO: deploy the sub-solver's Trampoline instance via the factory on first
-    // deposit (ADR-0003, deploy-at-deposit-time). Lands with the Trampoline factory.
     balances[_subSolver] += msg.value;
+    TRAMPOLINE_FACTORY.ensureDeployed(_subSolver);
     emit Deposited(_subSolver, msg.value);
   }
 

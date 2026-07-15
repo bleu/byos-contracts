@@ -4,9 +4,11 @@ pragma solidity ^0.8.28;
 import {Test} from 'forge-std/Test.sol';
 
 import {Escrow} from 'contracts/Escrow.sol';
+import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
 abstract contract EscrowTestBase is Test {
   Escrow escrow;
+  TrampolineFactory factory;
   address admin;
   address op;
   address subSolver;
@@ -22,7 +24,8 @@ abstract contract EscrowTestBase is Test {
     op = makeAddr('operator');
     subSolver = makeAddr('subSolver');
     subSolver2 = makeAddr('subSolver2');
-    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN);
+    factory = new TrampolineFactory(makeAddr('settlement'));
+    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN, factory);
   }
 }
 

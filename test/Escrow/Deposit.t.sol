@@ -30,6 +30,15 @@ contract DepositTest is EscrowTestBase {
     assertEq(escrow.balance(subSolver), 0);
   }
 
+  function test_deposit_deploys_trampoline_on_first_deposit() public {
+    address predicted = factory.addressOf(subSolver);
+    assertEq(predicted.code.length, 0);
+
+    escrow.deposit{value: 1 ether}(subSolver);
+
+    assertGt(predicted.code.length, 0);
+  }
+
   // --- Events ---
 
   function test_deposit_emits_event() public {
