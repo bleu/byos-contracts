@@ -25,7 +25,16 @@ abstract contract EscrowTestBase is Test {
     subSolver = makeAddr('subSolver');
     subSolver2 = makeAddr('subSolver2');
     factory = new TrampolineFactory(makeAddr('settlement'));
-    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN, factory);
+    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN, factory, 'BYOS Escrow', 'BYOS');
+  }
+
+  /// @dev Assert the core invariant: totalSupply + accumulatedDebits == contract ETH balance.
+  function assertInvariant() internal view {
+    assertEq(
+      escrow.totalSupply() + escrow.accumulatedDebits(),
+      address(escrow).balance,
+      'invariant: totalSupply + accumulatedDebits == ETH balance'
+    );
   }
 }
 

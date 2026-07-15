@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
+import {VmSafe} from 'forge-std/Vm.sol';
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
 
@@ -14,7 +15,7 @@ contract OperatorActionsTest is EscrowTestBase {
     escrow.deposit{value: 10 ether}(subSolver);
     vm.prank(op);
     escrow.debit(subSolver, 3 ether, keccak256('revert-tx-hash'));
-    assertEq(escrow.balance(subSolver), 7 ether);
+    assertEq(escrow.balanceOf(subSolver), 7 ether);
     assertEq(escrow.withdrawableBalance(), 3 ether);
   }
 
@@ -38,7 +39,7 @@ contract OperatorActionsTest is EscrowTestBase {
     escrow.deposit{value: 5 ether}(subSolver);
     vm.prank(op);
     escrow.debit(subSolver, 5 ether, keccak256('full'));
-    assertEq(escrow.balance(subSolver), 0);
+    assertEq(escrow.balanceOf(subSolver), 0);
     assertEq(escrow.withdrawableBalance(), 5 ether);
   }
 
@@ -46,7 +47,7 @@ contract OperatorActionsTest is EscrowTestBase {
     escrow.deposit{value: 5 ether}(subSolver);
     vm.prank(op);
     escrow.debit(subSolver, 0, keccak256('zero'));
-    assertEq(escrow.balance(subSolver), 5 ether);
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
   }
 
   function test_debit_multiple_incremental() public {
@@ -56,7 +57,7 @@ contract OperatorActionsTest is EscrowTestBase {
     escrow.debit(subSolver, 3 ether, keccak256('second'));
     escrow.debit(subSolver, 4 ether, keccak256('third'));
     vm.stopPrank();
-    assertEq(escrow.balance(subSolver), 0);
+    assertEq(escrow.balanceOf(subSolver), 0);
     assertEq(escrow.withdrawableBalance(), 10 ether);
   }
 
@@ -66,7 +67,6 @@ contract OperatorActionsTest is EscrowTestBase {
     vm.prank(subSolver);
     escrow.requestWithdrawal();
 
-    // Operator debits during cooldown (Track A revert)
     vm.prank(op);
     escrow.debit(subSolver, 3 ether, keccak256('revert'));
 
@@ -88,7 +88,6 @@ contract OperatorActionsTest is EscrowTestBase {
     vm.prank(subSolver);
     escrow.executeWithdrawal();
 
-    // Balance is now 0 — debit should revert
     vm.prank(op);
     vm.expectRevert(IEscrow.Escrow_InsufficientBalance.selector);
     escrow.debit(subSolver, 1 ether, keccak256('late-debit'));
@@ -122,7 +121,6 @@ contract OperatorActionsTest is EscrowTestBase {
     vm.prank(op);
     escrow.unfreeze(subSolver);
 
-    // Withdrawal succeeds immediately — cooldown already served
     vm.prank(subSolver);
     escrow.executeWithdrawal();
     assertEq(subSolver.balance, 10 ether);
@@ -136,7 +134,6 @@ contract OperatorActionsTest is EscrowTestBase {
     vm.prank(op);
     escrow.freeze(subSolver);
 
-    // Cancel should work even when frozen — funds staying in contract is always safe
     vm.prank(subSolver);
     escrow.cancelWithdrawal();
     assertEq(escrow.effectiveBalance(subSolver), 5 ether);
@@ -150,21 +147,31 @@ contract OperatorActionsTest is EscrowTestBase {
     escrow.freeze(subSolver);
   }
 
-  function test_double_freeze_is_idempotent() public {
+  function test_double_freeze_is_idempotent_no_event() public {
     vm.startPrank(op);
     escrow.freeze(subSolver);
     assertTrue(escrow.frozen(subSolver));
+
+    vm.recordLogs();
     escrow.freeze(subSolver);
+    VmSafe.Log[] memory logs = vm.getRecordedLogs();
+    assertEq(logs.length, 0);
+
     assertTrue(escrow.frozen(subSolver));
     vm.stopPrank();
   }
 
-  function test_double_unfreeze_is_idempotent() public {
+  function test_double_unfreeze_is_idempotent_no_event() public {
     vm.startPrank(op);
     escrow.freeze(subSolver);
     escrow.unfreeze(subSolver);
     assertFalse(escrow.frozen(subSolver));
+
+    vm.recordLogs();
     escrow.unfreeze(subSolver);
+    VmSafe.Log[] memory logs = vm.getRecordedLogs();
+    assertEq(logs.length, 0);
+
     assertFalse(escrow.frozen(subSolver));
     vm.stopPrank();
   }
@@ -178,6 +185,26 @@ contract OperatorActionsTest is EscrowTestBase {
       abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, OPERATOR_ROLE)
     );
     escrow.unfreeze(subSolver);
+  }
+
+  // --- Expanded freeze semantics (transfers) ---
+
+  function test_deposit_to_frozen_address_allowed() public {
+    vm.prank(op);
+    escrow.freeze(subSolver);
+
+    escrow.deposit{value: 5 ether}(subSolver);
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
+  }
+
+  function test_debit_frozen_address_allowed() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    vm.prank(op);
+    escrow.freeze(subSolver);
+
+    vm.prank(op);
+    escrow.debit(subSolver, 3 ether, keccak256('reason'));
+    assertEq(escrow.balanceOf(subSolver), 7 ether);
   }
 
   // --- Events ---

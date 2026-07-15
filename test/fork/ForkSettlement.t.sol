@@ -72,7 +72,7 @@ contract ForkSettlementTest is Test {
 
     // Deploy factory + escrow; the sub-solver's first deposit deploys its Trampoline.
     factory = new TrampolineFactory(address(SETTLEMENT));
-    Escrow escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), 1 days, factory);
+    Escrow escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), 1 days, factory, 'BYOS Escrow', 'BYOS');
     escrow.deposit{value: 1 ether}(subSolver);
     trampoline = Trampoline(payable(factory.addressOf(subSolver)));
   }
