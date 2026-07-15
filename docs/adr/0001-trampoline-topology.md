@@ -74,6 +74,11 @@ escrow-deposit time, paid by the sub-solver) is settled in
 
 ### Allowance hygiene and desired execution
 
+> Since acceptance, the sweep post-condition below (steps 3–4) was superseded by
+> [ADR-0008](0008-residue-disposition.md): `execute` settles back exactly `buyAmount`
+> and any remainder is residue, reclaimable by the sub-solver. The enforced invariant is
+> no *protocol* balance at rest, not zero balance.
+
 The leak-prevention control is the sweep, and it is required regardless of topology:
 
 1. `GPv2Settlement` transfers exactly `sellAmount` of `sellToken` into the instance.

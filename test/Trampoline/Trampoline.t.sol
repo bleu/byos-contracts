@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
 
@@ -11,6 +12,7 @@ import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
 import {MockRouter} from '../mocks/MockRouter.sol';
 import {MockWETH} from '../mocks/MockWETH.sol';
+import {ReentrantClaimer} from '../mocks/ReentrantClaimer.sol';
 import {Reverter} from '../mocks/Reverter.sol';
 import {TestERC20} from '../mocks/TestERC20.sol';
 import {ProposalSigning} from '../utils/ProposalSigning.sol';
@@ -339,6 +341,114 @@ contract TrampolineTest is Test {
     // forge-lint: disable-next-line(erc20-unchecked-transfer)
     buyToken.transferFrom(address(other), mallory, 1);
     assertEq(buyToken.balanceOf(address(other)), 7 ether);
+  }
+
+  // --- Residue claim (ADR-0008) ---
+
+  function test_claim_transfers_full_token_balance_to_recipient() public {
+    address treasury = makeAddr('treasury');
+    uint256 residue = 5 ether;
+    buyToken.mint(address(trampoline), residue);
+
+    address[] memory tokens = new address[](1);
+    tokens[0] = address(buyToken);
+
+    vm.prank(subSolver);
+    trampoline.claim(tokens, treasury);
+
+    assertEq(buyToken.balanceOf(treasury), residue);
+    assertEq(buyToken.balanceOf(address(trampoline)), 0);
+  }
+
+  function test_claim_sends_native_eth_for_sentinel_token() public {
+    address treasury = makeAddr('treasury');
+    uint256 residue = 3 ether;
+    vm.deal(address(trampoline), residue);
+
+    address[] memory tokens = new address[](1);
+    tokens[0] = BUY_ETH_ADDRESS;
+
+    vm.prank(subSolver);
+    trampoline.claim(tokens, treasury);
+
+    assertEq(treasury.balance, residue);
+    assertEq(address(trampoline).balance, 0);
+  }
+
+  function test_claim_handles_multiple_tokens_and_emits_event_per_token() public {
+    address treasury = makeAddr('treasury');
+    buyToken.mint(address(trampoline), 5 ether);
+    sellToken.mint(address(trampoline), 2 ether);
+    vm.deal(address(trampoline), 1 ether);
+
+    address[] memory tokens = new address[](3);
+    tokens[0] = address(buyToken);
+    tokens[1] = address(sellToken);
+    tokens[2] = BUY_ETH_ADDRESS;
+
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.ResidueClaimed(address(buyToken), 5 ether, treasury);
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.ResidueClaimed(address(sellToken), 2 ether, treasury);
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.ResidueClaimed(BUY_ETH_ADDRESS, 1 ether, treasury);
+
+    vm.prank(subSolver);
+    trampoline.claim(tokens, treasury);
+
+    assertEq(buyToken.balanceOf(treasury), 5 ether);
+    assertEq(sellToken.balanceOf(treasury), 2 ether);
+    assertEq(treasury.balance, 1 ether);
+  }
+
+  function test_claim_reverts_when_recipient_rejects_native_eth() public {
+    vm.deal(address(trampoline), 1 ether);
+
+    address[] memory tokens = new address[](1);
+    tokens[0] = BUY_ETH_ADDRESS;
+    address noReceive = address(new Reverter());
+
+    vm.prank(subSolver);
+    vm.expectRevert(ITrampoline.Trampoline_EthClaimFailed.selector);
+    trampoline.claim(tokens, noReceive);
+  }
+
+  function test_claim_reverts_when_caller_not_sub_solver() public {
+    buyToken.mint(address(trampoline), 5 ether);
+
+    address[] memory tokens = new address[](1);
+    tokens[0] = address(buyToken);
+
+    vm.prank(makeAddr('mallory'));
+    vm.expectRevert(ITrampoline.Trampoline_OnlySubSolver.selector);
+    trampoline.claim(tokens, makeAddr('mallory'));
+  }
+
+  function test_claim_mid_settlement_reverts_own_settlement_only() public {
+    // ADR-0008's documented-not-guarded behavior: a contract sub-solver whose route
+    // reenters claim pulls the buy tokens out from under the settle-back transfer,
+    // which reverts the whole settlement — self-harm, nothing extractable.
+    ReentrantClaimer claimer = new ReentrantClaimer();
+    vm.etch(subSolver, address(claimer).code);
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](3);
+    ITrampoline.Interaction[] memory swap = _swapRoute(BUY_AMOUNT);
+    route[0] = swap[0];
+    route[1] = swap[1];
+    route[2] = ITrampoline.Interaction({
+      target: subSolver,
+      value: 0,
+      callData: abi.encodeCall(ReentrantClaimer.reenter, (trampoline, address(buyToken), makeAddr('sink')))
+    });
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement);
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(trampoline), 0, BUY_AMOUNT)
+    );
+    trampoline.execute(proposal, route, address(buyToken), signature);
   }
 
   // --- EIP-712 domain separation ---

@@ -95,9 +95,8 @@ route produced, so a standard ERC20 `transfer(buyAmount)` behaves as the guard:
 The transfer's own insufficient-balance revert enforces that the trade is self-funding
 and that BYOS's buffer is never net-drained by a sub-solver, so no separate `balanceOf`
 assertion is needed. Surplus the route produces beyond `buyAmount` stays in the isolated
-trampoline as residue; its disposition (collected by BYOS and coupled into collateral
-sizing, versus left as a sub-solver-reclaimable reward outside the collateral model) is
-an open question, not yet an ADR.
+trampoline as residue; its disposition — sub-solver-reclaimable, outside the collateral
+model — is settled by [ADR-0008](0008-residue-disposition.md).
 
 ### Infra-failure attribution
 
@@ -136,7 +135,8 @@ to keep the contract minimal.
   "execution as simple and fast as possible" principle.
 - Self-funding is structural rather than a hope. A sub-solver's settlement can never
   net-drain BYOS's buffers, since an ordinary ERC20 revert enforces it.
-- Couplings: residue disposition remains open (see above); deployment couples to the
+- Couplings: residue disposition is settled by
+  [ADR-0008](0008-residue-disposition.md); deployment couples to the
   escrow-deposit flow ([ADR-0002](0002-escrow-contract.md)); the
   infra-failure-versus-sub-solver-fault split couples to attribution
   ([ADR-0004](0004-penalty-schedule-and-attribution.md)).

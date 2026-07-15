@@ -27,6 +27,18 @@ bytes32 constant PROPOSAL_TYPEHASH = keccak256(
  */
 interface ITrampoline {
   /*///////////////////////////////////////////////////////////////
+                              EVENTS
+  //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice The sub-solver has claimed residue from its instance (ADR-0008)
+   * @param _token The claimed token (BUY_ETH_ADDRESS for native ETH)
+   * @param _amount The full balance transferred out
+   * @param _recipient The address that received the claimed balance
+   */
+  event ResidueClaimed(address indexed _token, uint256 _amount, address indexed _recipient);
+
+  /*///////////////////////////////////////////////////////////////
                               STRUCTS
   //////////////////////////////////////////////////////////////*/
 
@@ -83,6 +95,16 @@ interface ITrampoline {
    */
   error Trampoline_EthSettleBackFailed();
 
+  /**
+   * @notice Throws if claim was called by someone else than the sub-solver
+   */
+  error Trampoline_OnlySubSolver();
+
+  /**
+   * @notice Throws if the native ETH claim transfer fails
+   */
+  error Trampoline_EthClaimFailed();
+
   /*///////////////////////////////////////////////////////////////
                              VARIABLES
   //////////////////////////////////////////////////////////////*/
@@ -128,5 +150,19 @@ interface ITrampoline {
     Interaction[] calldata _interactions,
     address _buyToken,
     bytes calldata _signature
+  ) external;
+
+  /**
+   * @notice Transfers the instance's full balance of each listed token to `_recipient`
+   * @dev Residue is the sub-solver's property (ADR-0008). The instance is storage-free
+   * and cannot enumerate what it holds; the caller lists tokens off-chain. Use
+   * BUY_ETH_ADDRESS to claim native ETH. Residue is at risk to allow-listed-solver
+   * replay while any signed proposal for this instance is unexpired — claim promptly.
+   * @param _tokens The tokens to claim; full balance each, BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balances
+   */
+  function claim(
+    address[] calldata _tokens,
+    address _recipient
   ) external;
 }
