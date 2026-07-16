@@ -27,8 +27,18 @@ abstract contract EscrowTestBase is Test {
     submitter = makeAddr('submitter');
     subSolver = makeAddr('subSolver');
     subSolver2 = makeAddr('subSolver2');
-    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, submitter, COOLDOWN, makeAddr('settlement'));
+    escrow =
+      new Escrow(ADMIN_TRANSFER_DELAY, admin, op, submitter, COOLDOWN, makeAddr('settlement'), 'BYOS Escrow', 'BYOS');
     factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
+  }
+
+  /// @dev Assert the core invariant: totalSupply + accumulatedDebits == contract ETH balance.
+  function assertInvariant() internal view {
+    assertEq(
+      escrow.totalSupply() + escrow.accumulatedDebits(),
+      address(escrow).balance,
+      'invariant: totalSupply + accumulatedDebits == ETH balance'
+    );
   }
 }
 
@@ -36,6 +46,33 @@ abstract contract EscrowTestBase is Test {
 contract RejectETH {
   receive() external payable {
     revert('rejected');
+  }
+}
+
+/// @dev Contract that re-deposits into Escrow when receiving ETH (e.g. from executeWithdrawal).
+contract ReentrantDepositor {
+  Escrow public target;
+  address public beneficiary;
+
+  constructor(
+    Escrow _target,
+    address _beneficiary
+  ) {
+    target = _target;
+    beneficiary = _beneficiary;
+  }
+
+  function requestWithdrawal() external {
+    target.requestWithdrawal();
+  }
+
+  function executeWithdrawal() external {
+    target.executeWithdrawal();
+  }
+
+  receive() external payable {
+    // Try to re-deposit during ETH receive callback
+    target.deposit{value: msg.value}(beneficiary);
   }
 }
 

@@ -71,9 +71,10 @@ sub-solver supplies only the route.
 Access control: `execute` is callable only in a settlement context
 (`msg.sender == GPv2Settlement`), only in a settlement submitted by BYOS
 (`tx.origin` must hold the Escrow's SUBMITTER_ROLE — settlements are permissionless at
-the protocol level, and without this any allow-listed solver could replay a public
-proposal), and additionally requires the sub-solver's EIP-712 signature over the route,
-for non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
+the protocol level, so once BYOS submits a settlement the route and sub-solver signature
+become public calldata that any allow-listed solver could otherwise replay), and
+additionally requires the sub-solver's EIP-712 signature over the route, for
+non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
 
 Batching: the flow above is per-trade. A settlement carrying multiple orders from the
 same sub-solver repeats steps 1 and 2 per trade through the one `Trampoline_S`. Whether

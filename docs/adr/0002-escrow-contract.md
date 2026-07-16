@@ -1,6 +1,6 @@
 # Escrow contract design
 
-Status: accepted
+Status: accepted (extended by [ADR-0007](0007-erc20-escrow-token.md))
 
 ## Context
 

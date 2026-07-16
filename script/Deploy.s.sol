@@ -17,10 +17,13 @@ contract Deploy is Script {
     address _submitter = vm.envAddress('BYOS_SUBMITTER');
     uint256 _cooldownPeriod = vm.envOr('COOLDOWN_PERIOD', uint256(1 days));
     address _settlement = vm.envOr('SETTLEMENT', DEFAULT_SETTLEMENT);
+    string memory _name = vm.envOr('ESCROW_TOKEN_NAME', string('BYOS Escrow'));
+    string memory _symbol = vm.envOr('ESCROW_TOKEN_SYMBOL', string('BYOS'));
 
     vm.startBroadcast();
 
-    Escrow _escrow = new Escrow(_adminTransferDelay, _admin, _operator, _submitter, _cooldownPeriod, _settlement);
+    Escrow _escrow =
+      new Escrow(_adminTransferDelay, _admin, _operator, _submitter, _cooldownPeriod, _settlement, _name, _symbol);
     console.log('Escrow deployed at:', address(_escrow));
     console.log('TrampolineFactory deployed at:', address(_escrow.TRAMPOLINE_FACTORY()));
 

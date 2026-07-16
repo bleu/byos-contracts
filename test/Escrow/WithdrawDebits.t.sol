@@ -48,8 +48,9 @@ contract WithdrawDebitsTest is EscrowTestBase {
 
   function test_withdraw_debits_reverts_if_admin_rejects_eth() public {
     RejectETH rejector = new RejectETH();
-    Escrow escrowBadAdmin =
-      new Escrow(ADMIN_TRANSFER_DELAY, address(rejector), op, submitter, COOLDOWN, makeAddr('settlement'));
+    Escrow escrowBadAdmin = new Escrow(
+      ADMIN_TRANSFER_DELAY, address(rejector), op, submitter, COOLDOWN, makeAddr('settlement'), 'BYOS Escrow', 'BYOS'
+    );
     escrowBadAdmin.deposit{value: 10 ether}(subSolver);
 
     vm.prank(op);
@@ -57,6 +58,23 @@ contract WithdrawDebitsTest is EscrowTestBase {
 
     vm.expectRevert(IEscrow.Escrow_TransferFailed.selector);
     escrowBadAdmin.withdrawDebits();
+  }
+
+  function test_withdraw_debits_reverts_if_admin_renounced() public {
+    escrow.deposit{value: 10 ether}(subSolver);
+    vm.prank(op);
+    escrow.debit(subSolver, 5 ether, keccak256('reason'));
+
+    vm.prank(admin);
+    escrow.beginDefaultAdminTransfer(address(0));
+    vm.warp(block.timestamp + ADMIN_TRANSFER_DELAY + 1);
+
+    vm.prank(admin);
+    escrow.renounceRole(ADMIN_ROLE, admin);
+    assertEq(escrow.defaultAdmin(), address(0));
+
+    vm.expectRevert(IEscrow.Escrow_NoAdmin.selector);
+    escrow.withdrawDebits();
   }
 
   // --- Events ---

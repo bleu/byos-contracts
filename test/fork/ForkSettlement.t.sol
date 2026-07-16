@@ -72,7 +72,9 @@ contract ForkSettlementTest is Test {
 
     // Deploy the escrow (which deploys the factory); the sub-solver's first deposit
     // deploys its Trampoline. The BYOS solver is the initial settlement submitter.
-    Escrow escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), solver, 1 days, address(SETTLEMENT));
+    Escrow escrow = new Escrow(
+      2 days, makeAddr('admin'), makeAddr('operator'), solver, 1 days, address(SETTLEMENT), 'BYOS Escrow', 'BYOS'
+    );
     factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
     escrow.deposit{value: 1 ether}(subSolver);
     trampoline = Trampoline(payable(factory.addressOf(subSolver)));
