@@ -178,6 +178,39 @@ contract TrampolineTest is Test {
     trampoline.execute(proposal, route, address(buyToken), signature);
   }
 
+  /// @dev The funding-guard property (ADR-0003) over fuzzed amounts: settle-back
+  /// succeeds iff the route's output covers buyAmount, the settlement receives
+  /// exactly buyAmount, and the surplus stays in the instance as residue.
+  function testFuzz_execute_settles_back_iff_route_output_covers_buy_amount(
+    uint256 buyAmount,
+    uint256 output
+  ) public {
+    // The router pays output from its own inventory (minted in setUp).
+    buyAmount = bound(buyAmount, 0, 1_000_000 ether);
+    output = bound(output, 0, 1_000_000 ether);
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(output);
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyAmount = buyAmount;
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement);
+    if (output >= buyAmount) {
+      trampoline.execute(proposal, route, address(buyToken), signature);
+
+      assertEq(buyToken.balanceOf(settlement), buyAmount);
+      assertEq(buyToken.balanceOf(address(trampoline)), output - buyAmount);
+    } else {
+      // Expect the settle-back transfer's own shortfall error specifically, so an
+      // unrelated revert (e.g. in the route) cannot make this branch pass.
+      vm.expectRevert(
+        abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(trampoline), output, buyAmount)
+      );
+      trampoline.execute(proposal, route, address(buyToken), signature);
+    }
+  }
+
   function test_execute_leaves_surplus_in_instance_as_residue() public {
     uint256 surplus = 5 ether;
     sellToken.mint(address(trampoline), SELL_AMOUNT);

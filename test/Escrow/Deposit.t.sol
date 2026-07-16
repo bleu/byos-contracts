@@ -3,31 +3,40 @@ pragma solidity ^0.8.28;
 
 import {IEscrow} from 'interfaces/IEscrow.sol';
 
-import {EscrowTestBase} from './EscrowTestBase.sol';
+import {EscrowTestBase, ReentrantDepositor} from './EscrowTestBase.sol';
 
 contract DepositTest is EscrowTestBase {
   function test_deposit_credits_sub_solver() public {
     escrow.deposit{value: 5 ether}(subSolver);
-    assertEq(escrow.balance(subSolver), 5 ether);
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
     assertEq(escrow.effectiveBalance(subSolver), 5 ether);
   }
 
   function test_deposit_multiple_accumulates() public {
     escrow.deposit{value: 3 ether}(subSolver);
     escrow.deposit{value: 2 ether}(subSolver);
-    assertEq(escrow.balance(subSolver), 5 ether);
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
   }
 
   function test_deposit_anyone_can_deposit_for_sub_solver() public {
     vm.deal(subSolver2, 10 ether);
     vm.prank(subSolver2);
     escrow.deposit{value: 1 ether}(subSolver);
-    assertEq(escrow.balance(subSolver), 1 ether);
+    assertEq(escrow.balanceOf(subSolver), 1 ether);
   }
 
-  function test_deposit_zero_value() public {
+  function test_deposit_zero_value_reverts() public {
+    vm.expectRevert(IEscrow.Escrow_ZeroValue.selector);
     escrow.deposit{value: 0}(subSolver);
-    assertEq(escrow.balance(subSolver), 0);
+  }
+
+  function test_deposit_reverts_if_receiver_has_pending_withdrawal() public {
+    escrow.deposit{value: 5 ether}(subSolver);
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
+
+    vm.expectRevert(IEscrow.Escrow_WithdrawalPending.selector);
+    escrow.deposit{value: 1 ether}(subSolver);
   }
 
   function test_deposit_deploys_trampoline_on_first_deposit() public {
@@ -37,6 +46,30 @@ contract DepositTest is EscrowTestBase {
     escrow.deposit{value: 1 ether}(subSolver);
 
     assertGt(predicted.code.length, 0);
+  }
+
+  // --- Reentrancy ---
+
+  function test_deposit_reentrancy_from_executeWithdrawal_preserves_invariant() public {
+    ReentrantDepositor depositor = new ReentrantDepositor(escrow, subSolver);
+
+    // Fund the depositor and deposit into its escrow balance
+    escrow.deposit{value: 5 ether}(address(depositor));
+    assertEq(escrow.balanceOf(address(depositor)), 5 ether);
+
+    // Request withdrawal and wait for cooldown
+    depositor.requestWithdrawal();
+    vm.warp(block.timestamp + COOLDOWN);
+
+    // Execute withdrawal — depositor's receive() will re-deposit for subSolver
+    depositor.executeWithdrawal();
+
+    // Depositor's balance was burned during withdrawal
+    assertEq(escrow.balanceOf(address(depositor)), 0);
+    // Re-deposited ETH was minted to subSolver
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
+    // Core invariant holds
+    assertInvariant();
   }
 
   // --- Events ---

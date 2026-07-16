@@ -20,6 +20,7 @@ live with the BYOS service.
 | [0004](0004-penalty-schedule-and-attribution.md) | Penalty schedule & attribution | accepted |
 | [0005](0005-trampoline-execution-authority.md) | Trampoline execution authority & proposal signature | accepted |
 | [0006](0006-solidity-style-and-natspec.md) | Solidity coding style & natspec conventions | accepted |
+| [0007](0007-erc20-escrow-token.md) | ERC20 escrow token (transfers, pause, expanded freeze) | accepted |
 | [0008](0008-residue-disposition.md) | Residue disposition: sub-solver-reclaimable | accepted |
 
 ## Known open questions
