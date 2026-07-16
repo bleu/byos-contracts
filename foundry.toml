@@ -20,6 +20,9 @@ deny = "warnings"
 # versions warn inside OpenZeppelin sources we don't control).
 ignored_warnings_from = ["lib"]
 
+# The Eip712Vectors generator rewrites the committed vector file in place.
+fs_permissions = [{ access = "read-write", path = "./test/vectors" }]
+
 [lint]
 exclude_lints = ["block-timestamp"]
 
