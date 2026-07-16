@@ -161,6 +161,10 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
   deploy, and the address is derived from the sub-solver address. The RFP's stated
   downside of per-instance, "more deploys and bookkeeping", is largely neutralized by
   deterministic addressing.
+- The isolation claim this ADR rests on — a route reaches only its own instance's
+  residue, never settlement buffers, user funds, escrow collateral, or another instance —
+  is proven adversarially against the real `GPv2Settlement` in
+  [docs/security/trampoline-settlement-isolation.md](../security/trampoline-settlement-isolation.md).
 
 ### Flagged downstream decisions (coupled, not settled here)
 
