@@ -86,4 +86,47 @@ contract Trampoline is ITrampoline {
       IERC20(_buyToken).safeTransfer(SETTLEMENT, _proposal.buyAmount);
     }
   }
+
+  /// @inheritdoc ITrampoline
+  function claimToken(
+    address _token,
+    address _recipient
+  ) external {
+    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+
+    _claimToken(_token, _recipient);
+  }
+
+  /// @inheritdoc ITrampoline
+  function claimTokens(
+    address[] calldata _tokens,
+    address _recipient
+  ) external {
+    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+
+    for (uint256 _i = 0; _i < _tokens.length; ++_i) {
+      _claimToken(_tokens[_i], _recipient);
+    }
+  }
+
+  /**
+   * @notice Transfers the instance's full balance of `_token` to `_recipient`
+   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balance
+   */
+  function _claimToken(
+    address _token,
+    address _recipient
+  ) internal {
+    uint256 _amount;
+    if (_token == BUY_ETH_ADDRESS) {
+      _amount = address(this).balance;
+      (bool _success,) = _recipient.call{value: _amount}('');
+      if (!_success) revert Trampoline_EthClaimFailed();
+    } else {
+      _amount = IERC20(_token).balanceOf(address(this));
+      IERC20(_token).safeTransfer(_recipient, _amount);
+    }
+    emit ResidueClaimed(_token, _amount, _recipient);
+  }
 }
