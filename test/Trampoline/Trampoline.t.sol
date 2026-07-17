@@ -535,7 +535,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    vm.prank(settlement);
+    vm.prank(settlement, submitter);
     vm.expectRevert(
       abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(trampoline), 0, BUY_AMOUNT)
     );
