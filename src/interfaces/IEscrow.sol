@@ -177,6 +177,14 @@ interface IEscrow is IERC20 {
   function OPERATOR_ROLE() external view returns (bytes32 _operatorRole);
 
   /**
+   * @notice Role identifier for settlement submitters (EOAs the BYOS service submits
+   * settlements from); Trampoline.execute requires tx.origin to hold this role
+   * @return _submitterRole The keccak256 hash of "SUBMITTER_ROLE"
+   */
+  // solhint-disable-next-line func-name-mixedcase
+  function SUBMITTER_ROLE() external view returns (bytes32 _submitterRole);
+
+  /**
    * @notice Returns the timestamp of a sub-solver's pending withdrawal request, or 0 if none
    * @param _subSolver The sub-solver to query
    * @return _requestedAt The request timestamp, or 0 if no request is pending

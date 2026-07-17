@@ -70,9 +70,12 @@ contract ForkSettlementTest is Test {
     vm.prank(auth.manager());
     auth.addSolver(solver);
 
-    // Deploy factory + escrow; the sub-solver's first deposit deploys its Trampoline.
-    factory = new TrampolineFactory(address(SETTLEMENT));
-    Escrow escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), 1 days, factory, 'BYOS Escrow', 'BYOS');
+    // Deploy the escrow (which deploys the factory); the sub-solver's first deposit
+    // deploys its Trampoline. The BYOS solver is the initial settlement submitter.
+    Escrow escrow = new Escrow(
+      2 days, makeAddr('admin'), makeAddr('operator'), solver, 1 days, address(SETTLEMENT), 'BYOS Escrow', 'BYOS'
+    );
+    factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
     escrow.deposit{value: 1 ether}(subSolver);
     trampoline = Trampoline(payable(factory.addressOf(subSolver)));
   }
@@ -211,7 +214,8 @@ contract ForkSettlementTest is Test {
       callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, buyToken, prop.signature))
     });
 
-    vm.prank(solver);
+    // A solver submits settle() from its own EOA: msg.sender and tx.origin are both it.
+    vm.prank(solver, solver);
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
@@ -244,6 +248,45 @@ contract ForkSettlementTest is Test {
     assertEq(USDC.balanceOf(address(SETTLEMENT)), settlementUsdcBefore);
     assertEq(WETH.balanceOf(address(trampoline)), 0);
     assertEq(USDC.balanceOf(address(trampoline)), 0);
+  }
+
+  function test_fork_replayed_proposal_by_second_solver_reverts() public onlyFork {
+    // COW-1151: after BYOS settles, the proposal's signature and route are public
+    // calldata. A rival allow-listed solver carries the same execute in its own
+    // (tradeless) settlement to skim the instance's residue. The submitter gate
+    // must reject it: the rival passes the protocol's solver allowlist but holds
+    // no SUBMITTER_ROLE on the BYOS escrow.
+    uint256 sellAmount = 1 ether;
+
+    vm.deal(user, 2 ether);
+    vm.startPrank(user);
+    WETH.deposit{value: sellAmount}();
+    WETH.approve(SETTLEMENT.vaultRelayer(), sellAmount);
+    vm.stopPrank();
+
+    uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
+    SignedProposal memory prop =
+      _signProposal(sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut, false));
+
+    // BYOS settles the proposal; from here on its calldata is public.
+    _settleOrder(address(WETH), address(USDC), sellAmount, quotedOut, prop);
+
+    address rival = makeAddr('rivalSolver');
+    IGPv2Authentication auth = IGPv2Authentication(SETTLEMENT.authenticator());
+    vm.prank(auth.manager());
+    auth.addSolver(rival);
+
+    ITrampoline.Interaction[][3] memory interactions;
+    interactions[1] = new ITrampoline.Interaction[](1);
+    interactions[1][0] = ITrampoline.Interaction({
+      target: address(trampoline),
+      value: 0,
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, address(USDC), prop.signature))
+    });
+
+    vm.prank(rival, rival);
+    vm.expectRevert(ITrampoline.Trampoline_UnauthorizedSubmitter.selector);
+    SETTLEMENT.settle(new address[](0), new uint256[](0), new GPv2TradeData[](0), interactions);
   }
 
   function test_fork_settle_eth_buy_order_through_trampoline() public onlyFork {

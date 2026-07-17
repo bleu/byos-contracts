@@ -11,14 +11,20 @@ contract TrampolineFactory is ITrampolineFactory, EIP712 {
   /// @inheritdoc ITrampolineFactory
   address public immutable SETTLEMENT;
 
+  /// @inheritdoc ITrampolineFactory
+  address public immutable ESCROW;
+
   /**
    * @notice Sets the settlement contract and the EIP-712 domain (name "BYOS", version "0.1")
+   * @dev The deployer is recorded as the Escrow whose SUBMITTER_ROLE gates instance
+   * execution; in production the Escrow deploys the factory from its constructor
    * @param _settlement GPv2Settlement address for this chain
    */
   constructor(
     address _settlement
   ) EIP712('BYOS', '0.1') {
     SETTLEMENT = _settlement;
+    ESCROW = msg.sender;
   }
 
   /// @inheritdoc ITrampolineFactory
@@ -27,7 +33,7 @@ contract TrampolineFactory is ITrampolineFactory, EIP712 {
   ) external returns (address _instance) {
     _instance = addressOf(_subSolver);
     if (_instance.code.length == 0) {
-      new Trampoline{salt: bytes32(uint256(uint160(_subSolver)))}(_subSolver, SETTLEMENT, _domainSeparatorV4());
+      new Trampoline{salt: bytes32(uint256(uint160(_subSolver)))}(_subSolver, SETTLEMENT, _domainSeparatorV4(), ESCROW);
       emit TrampolineDeployed(_subSolver, _instance);
     }
   }
@@ -42,7 +48,7 @@ contract TrampolineFactory is ITrampolineFactory, EIP712 {
     address _subSolver
   ) public view returns (address _trampoline) {
     bytes32 _initCodeHash = keccak256(
-      abi.encodePacked(type(Trampoline).creationCode, abi.encode(_subSolver, SETTLEMENT, _domainSeparatorV4()))
+      abi.encodePacked(type(Trampoline).creationCode, abi.encode(_subSolver, SETTLEMENT, _domainSeparatorV4(), ESCROW))
     );
     _trampoline = address(
       uint160(

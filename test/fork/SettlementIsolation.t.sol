@@ -98,9 +98,12 @@ contract SettlementIsolationTest is Test {
     vm.prank(auth.manager());
     auth.addSolver(solver);
 
-    // Deploy factory + escrow; the sub-solver's first deposit deploys its Trampoline.
-    factory = new TrampolineFactory(address(SETTLEMENT));
-    Escrow escrow = new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), 1 days, factory, 'BYOS Escrow', 'BYOS');
+    // Deploy the escrow (which deploys the factory); the sub-solver's first deposit
+    // deploys its Trampoline. The BYOS solver is the initial settlement submitter.
+    Escrow escrow = new Escrow(
+      2 days, makeAddr('admin'), makeAddr('operator'), solver, 1 days, address(SETTLEMENT), 'BYOS Escrow', 'BYOS'
+    );
+    factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
     escrow.deposit{value: 1 ether}(subSolver);
     trampoline = Trampoline(payable(factory.addressOf(subSolver)));
 
@@ -145,13 +148,15 @@ contract SettlementIsolationTest is Test {
   }
 
   /// @dev Drives `execute` directly from the settlement — the only caller it accepts.
-  /// Native `settle` reentrancy is covered separately; this exercises the route alone.
+  /// `tx.origin` is the BYOS submitter (`solver`), which the execute submitter gate
+  /// requires; native `settle` reentrancy is covered separately; this exercises the
+  /// route alone.
   function _executeAsSettlement(
     ITrampoline.Proposal memory proposal,
     ITrampoline.Interaction[] memory route,
     bytes memory signature
   ) internal {
-    vm.prank(address(SETTLEMENT));
+    vm.prank(address(SETTLEMENT), solver);
     trampoline.execute(proposal, route, address(bufferToken), signature);
   }
 
@@ -176,7 +181,9 @@ contract SettlementIsolationTest is Test {
       callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(bufferToken), signature))
     });
 
-    vm.prank(solver);
+    // msg.sender and tx.origin are both the submitter solver: the protocol's onlySolver
+    // gate and the trampoline's submitter gate each read one of them.
+    vm.prank(solver, solver);
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 

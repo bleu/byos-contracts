@@ -40,6 +40,13 @@ contract TrampolineFactoryTest is Test {
     assertEq(instance.SUB_SOLVER(), subSolver);
     assertEq(instance.SETTLEMENT(), settlement);
     assertEq(instance.DOMAIN_SEPARATOR(), factory.domainSeparator());
+    assertEq(instance.ESCROW(), factory.ESCROW());
+  }
+
+  function test_factory_records_deployer_as_escrow() public view {
+    // In production the Escrow deploys the factory from its constructor; here the
+    // test contract plays that role.
+    assertEq(factory.ESCROW(), address(this));
   }
 
   function test_distinct_sub_solvers_get_distinct_instances() public {

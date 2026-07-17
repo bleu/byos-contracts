@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {ECDSA} from '@openzeppelin/contracts/utils/cryptography/ECDSA.sol';
 import {MessageHashUtils} from '@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol';
 
+import {IEscrow} from 'interfaces/IEscrow.sol';
 import {BUY_ETH_ADDRESS, ITrampoline, PROPOSAL_TYPEHASH} from 'interfaces/ITrampoline.sol';
 
 contract Trampoline is ITrampoline {
@@ -20,21 +22,27 @@ contract Trampoline is ITrampoline {
   /// @inheritdoc ITrampoline
   bytes32 public immutable DOMAIN_SEPARATOR;
 
+  /// @inheritdoc ITrampoline
+  address public immutable ESCROW;
+
   /**
-   * @notice Wires the instance to its sub-solver, the settlement contract, and the
-   * factory's EIP-712 domain
+   * @notice Wires the instance to its sub-solver, the settlement contract, the
+   * factory's EIP-712 domain, and the Escrow acting as submitter registry
    * @param _subSolver Sub-solver address; proposal signatures must recover to it
    * @param _settlement GPv2Settlement address
    * @param _domainSeparator The factory's EIP-712 domain separator
+   * @param _escrow Escrow whose SUBMITTER_ROLE gates settlement submission
    */
   constructor(
     address _subSolver,
     address _settlement,
-    bytes32 _domainSeparator
+    bytes32 _domainSeparator,
+    address _escrow
   ) {
     SUB_SOLVER = _subSolver;
     SETTLEMENT = _settlement;
     DOMAIN_SEPARATOR = _domainSeparator;
+    ESCROW = _escrow;
   }
 
   /**
@@ -50,6 +58,13 @@ contract Trampoline is ITrampoline {
     bytes calldata _signature
   ) external {
     if (msg.sender != SETTLEMENT) revert Trampoline_OnlySettlement();
+    // Settlements are permissionless at the protocol level: once this proposal's
+    // signature is public calldata, any allow-listed CoW solver could replay it
+    // (or front-run it) in its own settlement and skim the instance's residue.
+    // tx.origin identifies the submitting solver; only BYOS's own EOAs pass.
+    if (!IAccessControl(ESCROW).hasRole(IEscrow(ESCROW).SUBMITTER_ROLE(), tx.origin)) {
+      revert Trampoline_UnauthorizedSubmitter();
+    }
     if (block.timestamp > _proposal.validUntil) revert Trampoline_ProposalExpired();
 
     bytes32 _structHash = keccak256(

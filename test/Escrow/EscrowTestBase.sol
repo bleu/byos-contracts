@@ -11,6 +11,7 @@ abstract contract EscrowTestBase is Test {
   TrampolineFactory factory;
   address admin;
   address op;
+  address submitter;
   address subSolver;
   address subSolver2;
 
@@ -18,14 +19,17 @@ abstract contract EscrowTestBase is Test {
   uint48 constant ADMIN_TRANSFER_DELAY = 2 days;
   bytes32 constant ADMIN_ROLE = 0x00;
   bytes32 constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
+  bytes32 constant SUBMITTER_ROLE = keccak256('SUBMITTER_ROLE');
 
   function setUp() public {
     admin = makeAddr('admin');
     op = makeAddr('operator');
+    submitter = makeAddr('submitter');
     subSolver = makeAddr('subSolver');
     subSolver2 = makeAddr('subSolver2');
-    factory = new TrampolineFactory(makeAddr('settlement'));
-    escrow = new Escrow(ADMIN_TRANSFER_DELAY, admin, op, COOLDOWN, factory, 'BYOS Escrow', 'BYOS');
+    escrow =
+      new Escrow(ADMIN_TRANSFER_DELAY, admin, op, submitter, COOLDOWN, makeAddr('settlement'), 'BYOS Escrow', 'BYOS');
+    factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
   }
 
   /// @dev Assert the core invariant: totalSupply + accumulatedDebits == contract ETH balance.
