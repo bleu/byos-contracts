@@ -46,46 +46,12 @@ Why not BYOS-unilateral:
 
 ### Submitter gating: `tx.origin` must hold the Escrow's SUBMITTER_ROLE
 
-The `msg.sender == GPv2Settlement` check alone does not establish *which solver*
-submitted the settlement. Once BYOS settles a proposal, its signature and route are
-public calldata, and while `validUntil` is live any other allow-listed CoW solver can
-carry a replayed `execute` in its own settlement — or front-run the original if it is
-visible in a public mempool. A replayed route that produces less than `buyAmount` pays
-the difference out of the instance's residue into the attacker's settlement buffer,
-where CoW slippage accounting credits it to them. Bounded (only residue is reachable),
-but real.
-
-`execute` therefore additionally requires `tx.origin` to hold the Escrow's
-`SUBMITTER_ROLE`. `tx.origin` is the right identity signal here: GPv2Settlement exposes
-no "current solver" context on-chain, and every BYOS submission path bottoms out in an
-EOA that BYOS controls. There are two such paths, and they put different addresses in
-`tx.origin`:
-
-- **Direct**: the allow-listed solver EOA signs and broadcasts `settle()` itself. It is
-  both `msg.sender` to the settlement and `tx.origin`.
-- **Delegated parallel** (`cowprotocol/solver-7702-delegate`): the solver EOA delegates
-  its code to `Solver7702Delegate` via EIP-7702, and one of up to five immutable
-  approved auxiliary EOAs signs and broadcasts the transaction *to the solver EOA*,
-  which forwards to `settle()`. At the settlement, `msg.sender` is still the solver EOA
-  (passing the CoW allowlist), but `tx.origin` is the auxiliary account. Each auxiliary
-  account has its own nonce, which is what allows parallel settlement submission.
-
-The gate supports both paths because the submitter set is a grantable role, not a
-single address: the Escrow constructor takes a submitter list, so the solver EOA *and*
-each approved auxiliary account get `SUBMITTER_ROLE` at deploy time, and the Owner
-grants or revokes members afterwards. This adds no blast radius — an approved caller can already execute
-arbitrary calls as the solver EOA through the delegate's fallback, so it is fully
-trusted either way. The classic `tx.origin` caveats (contract wallets, ERC-4337) don't
-apply because BYOS controls its own submission path.
-
-The allowed-submitter set lives on the Escrow as a role rather than as an immutable
-address because submitter rotation is a realistic event (key hygiene, multiple
-submission EOAs), and an immutable address would make rotation cascade: new factory →
-new EIP-712 domain (all outstanding signatures invalid) → new trampoline addresses →
-new Escrow. Role management is `DEFAULT_ADMIN_ROLE` only (the Owner multisig), so the
-operator's grief-only threat model is unchanged. To break the resulting circular
-constructor dependency, the Escrow deploys the factory from its own constructor:
-Escrow, factory, and EIP-712 domain form one deployment generation.
+Once BYOS settles a proposal, its signature and route are public calldata, so while
+`validUntil` is live any other allow-listed CoW solver could replay or front-run the
+`execute` in its own settlement and capture the instance's residue. `execute` therefore
+also requires `tx.origin` to hold the Escrow's grantable `SUBMITTER_ROLE` — granted at
+deploy time to the solver EOA and, for parallel submission through CoW's
+`Solver7702Delegate`, each approved auxiliary account.
 
 ### EIP-712 typed-data schema
 
@@ -133,8 +99,8 @@ instances. It is a natural singleton per chain, per deployment generation. Bindi
 the factory cleanly separates contract generations (v1 factory signatures don't verify
 against v2). Trampoline instances can hardcode or inherit the factory address (deployed
 by it), making on-chain verification straightforward. The factory itself is deployed by
-the Escrow's constructor (see submitter gating above), so a generation is anchored by
-its Escrow.
+the Escrow's constructor (avoiding a circular constructor dependency with the submitter
+role check), so a generation is anchored by its Escrow.
 
 ### Nonce semantics: unique salt, no enforcement
 
