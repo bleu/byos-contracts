@@ -22,6 +22,7 @@ live with the BYOS service.
 | [0006](0006-solidity-style-and-natspec.md) | Solidity coding style & natspec conventions | accepted |
 | [0007](0007-erc20-escrow-token.md) | ERC20 escrow token (transfers, pause, expanded freeze) | accepted |
 | [0008](0008-residue-disposition.md) | Residue disposition: sub-solver-reclaimable | accepted |
+| [0009](0009-batch-proposals-net-flows.md) | Batch proposals: net token flows for multi-order settlements | proposed |
 
 ## Known open questions
 
