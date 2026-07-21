@@ -38,8 +38,16 @@ contract TrampolineTest is Test {
     settlement = makeAddr('settlement');
     submitter = makeAddr('submitter');
     (subSolver, subSolverKey) = makeAddrAndKey('subSolver');
-    escrow =
-      new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), submitter, 1 days, settlement, 'BYOS Escrow', 'BYOS');
+    escrow = new Escrow(
+      2 days,
+      makeAddr('admin'),
+      makeAddr('operator'),
+      _soloSubmitters(submitter),
+      1 days,
+      settlement,
+      'BYOS Escrow',
+      'BYOS'
+    );
     factory = TrampolineFactory(address(escrow.TRAMPOLINE_FACTORY()));
     trampoline = Trampoline(payable(factory.ensureDeployed(subSolver)));
 
@@ -50,6 +58,14 @@ contract TrampolineTest is Test {
   }
 
   // --- Helpers ---
+
+  /// @dev Wraps a single submitter in the constructor's submitter-list shape.
+  function _soloSubmitters(
+    address _submitter
+  ) internal pure returns (address[] memory _submitters) {
+    _submitters = new address[](1);
+    _submitters[0] = _submitter;
+  }
 
   function _proposal() internal view returns (ITrampoline.Proposal memory) {
     return ITrampoline.Proposal({
@@ -163,6 +179,39 @@ contract TrampolineTest is Test {
     trampoline.execute(proposal, route, address(buyToken), signature);
 
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
+  function test_execute_accepts_solver_7702_delegate_auxiliary_submitters() public {
+    // CoW's Solver7702Delegate parallel path: an auxiliary account signs and
+    // broadcasts the settlement transaction to the delegated solver EOA, so at the
+    // Trampoline tx.origin is the auxiliary account, not the allow-listed solver.
+    // Wiring the solver EOA and every auxiliary account as constructor submitters
+    // keeps the gate satisfied on all submission lanes (ADR-0005).
+    address solverEoa = makeAddr('solverEoa');
+    address[] memory submitters = new address[](3);
+    submitters[0] = solverEoa;
+    submitters[1] = makeAddr('aux0');
+    submitters[2] = makeAddr('aux1');
+
+    Escrow escrow7702 = new Escrow(
+      2 days, makeAddr('admin'), makeAddr('operator'), submitters, 1 days, settlement, 'BYOS Escrow', 'BYOS'
+    );
+    TrampolineFactory factory7702 = TrampolineFactory(address(escrow7702.TRAMPOLINE_FACTORY()));
+    Trampoline instance = Trampoline(payable(factory7702.ensureDeployed(subSolver)));
+
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes32 digest = ProposalSigning.digest(factory7702.domainSeparator(), proposal, route);
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(subSolverKey, digest);
+    bytes memory signature = abi.encodePacked(r, s, v);
+
+    for (uint256 i = 0; i < submitters.length; ++i) {
+      sellToken.mint(address(instance), SELL_AMOUNT);
+      vm.prank(settlement, submitters[i]);
+      instance.execute(proposal, route, address(buyToken), signature);
+    }
+
+    assertEq(buyToken.balanceOf(settlement), submitters.length * BUY_AMOUNT);
   }
 
   function test_execute_reverts_when_proposal_expired() public {
@@ -547,8 +596,16 @@ contract TrampolineTest is Test {
   function test_signature_from_other_factory_generation_fails() public {
     // An escrow redeployment (v2) brings a new factory and a new EIP-712 domain:
     // signatures against the v1 factory must not verify on a v2 instance (ADR-0005).
-    Escrow escrow2 =
-      new Escrow(2 days, makeAddr('admin'), makeAddr('operator'), submitter, 1 days, settlement, 'BYOS Escrow', 'BYOS');
+    Escrow escrow2 = new Escrow(
+      2 days,
+      makeAddr('admin'),
+      makeAddr('operator'),
+      _soloSubmitters(submitter),
+      1 days,
+      settlement,
+      'BYOS Escrow',
+      'BYOS'
+    );
     TrampolineFactory factory2 = TrampolineFactory(address(escrow2.TRAMPOLINE_FACTORY()));
     Trampoline instance2 = Trampoline(payable(factory2.ensureDeployed(subSolver)));
     assertTrue(address(instance2) != address(trampoline));

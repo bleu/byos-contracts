@@ -54,11 +54,17 @@ MAINNET_RPC_URL= forge test                    # skip fork tests
 ### Deploy
 
 ```bash
-ESCROW_OWNER=<address> ESCROW_OPERATOR=<address> forge script script/Deploy.s.sol --broadcast
+ESCROW_ADMIN=<address> ESCROW_OPERATOR=<address> BYOS_SUBMITTERS=<addr1>,<addr2> \
+  forge script script/Deploy.s.sol --broadcast
 ```
 
-Deploys the TrampolineFactory and the Escrow wired to it. Optional: `COOLDOWN_PERIOD`
-(default: 1 day) and `SETTLEMENT` (default: the canonical GPv2Settlement address).
+Deploys the TrampolineFactory and the Escrow wired to it. `BYOS_SUBMITTERS` is the
+comma-separated list of every EOA that can be `tx.origin` of a BYOS settlement — the
+allow-listed solver EOA plus, when submitting through CoW's Solver7702Delegate, each
+approved auxiliary account ([ADR-0005](docs/adr/0005-trampoline-execution-authority.md)).
+Optional: `COOLDOWN_PERIOD` (default: 1 day), `SETTLEMENT` (default: the canonical
+GPv2Settlement address), `ADMIN_TRANSFER_DELAY` (default: 2 days), and
+`ESCROW_TOKEN_NAME`/`ESCROW_TOKEN_SYMBOL`.
 
 ## License
 

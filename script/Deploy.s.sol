@@ -14,7 +14,9 @@ contract Deploy is Script {
     uint48 _adminTransferDelay = uint48(vm.envOr('ADMIN_TRANSFER_DELAY', uint256(2 days)));
     address _admin = vm.envAddress('ESCROW_ADMIN');
     address _operator = vm.envAddress('ESCROW_OPERATOR');
-    address _submitter = vm.envAddress('BYOS_SUBMITTER');
+    // Comma-separated list: the allow-listed solver EOA plus, when submitting through
+    // CoW's Solver7702Delegate, each approved auxiliary account (ADR-0005).
+    address[] memory _submitters = vm.envAddress('BYOS_SUBMITTERS', ',');
     uint256 _cooldownPeriod = vm.envOr('COOLDOWN_PERIOD', uint256(1 days));
     address _settlement = vm.envOr('SETTLEMENT', DEFAULT_SETTLEMENT);
     string memory _name = vm.envOr('ESCROW_TOKEN_NAME', string('BYOS Escrow'));
@@ -23,7 +25,7 @@ contract Deploy is Script {
     vm.startBroadcast();
 
     Escrow _escrow =
-      new Escrow(_adminTransferDelay, _admin, _operator, _submitter, _cooldownPeriod, _settlement, _name, _symbol);
+      new Escrow(_adminTransferDelay, _admin, _operator, _submitters, _cooldownPeriod, _settlement, _name, _symbol);
     console.log('Escrow deployed at:', address(_escrow));
     console.log('TrampolineFactory deployed at:', address(_escrow.TRAMPOLINE_FACTORY()));
 

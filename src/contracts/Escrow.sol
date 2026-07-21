@@ -44,7 +44,9 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
    * @param _adminTransferDelay Seconds the default-admin transfer must wait before acceptance
    * @param _admin Secure wallet (e.g. multisig) that owns the contract; granted DEFAULT_ADMIN_ROLE
    * @param _operator EOA used by the BYOS service for automated debit/freeze operations; granted OPERATOR_ROLE
-   * @param _submitter EOA the BYOS service submits settlements from; granted SUBMITTER_ROLE
+   * @param _submitters EOAs the BYOS service submits settlements from, each granted SUBMITTER_ROLE.
+   * Includes every address that can be `tx.origin` of a settlement: the allow-listed solver EOA
+   * and, when submitting through CoW's Solver7702Delegate, each approved auxiliary account (ADR-0005)
    * @param _cooldownPeriod Time in seconds a sub-solver must wait after requesting withdrawal
    * @param _settlement GPv2Settlement address baked into the factory and its instances
    * @param _name ERC20 token name (e.g. "BYOS Escrow" or "BYOS Escrow (Gnosis)")
@@ -54,7 +56,7 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
     uint48 _adminTransferDelay,
     address _admin,
     address _operator,
-    address _submitter,
+    address[] memory _submitters,
     uint256 _cooldownPeriod,
     address _settlement,
     string memory _name,
@@ -62,7 +64,9 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
   ) ERC20(_name, _symbol) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
     if (_settlement == address(0)) revert Escrow_ZeroAddress();
     _grantRole(OPERATOR_ROLE, _operator);
-    _grantRole(SUBMITTER_ROLE, _submitter);
+    for (uint256 _i = 0; _i < _submitters.length; ++_i) {
+      _grantRole(SUBMITTER_ROLE, _submitters[_i]);
+    }
     cooldownPeriod = _cooldownPeriod;
     TRAMPOLINE_FACTORY = new TrampolineFactory(_settlement);
   }
