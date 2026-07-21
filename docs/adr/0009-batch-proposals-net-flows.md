@@ -49,6 +49,44 @@ Volume that CoWs between orders never touches the trampoline; `GPv2Settlement` n
 internally. A batch of one degenerates to today's flow exactly, so there is a single
 schema and a single `execute` path — the old typehash is retired, not kept alongside.
 
+ADR-0003's buffer-safety argument carries over: per token, the net surplus is at most
+what the users' sell transfers just pulled in, so inflows are always trade capital in
+transit — a settlement can never legitimately require funding the trampoline from
+BYOS's own buffer.
+
+### Worked example
+
+Alice sells 10 WETH for USDC; Bob sells 20,000 USDC for WETH; both clear at 2,500
+USDC per WETH (fees ignored). Alice is owed 25,000 USDC, Bob is owed 8 WETH. After
+pulling both sell amounts the settlement holds 10 WETH against 8 owed (surplus 2) and
+20,000 USDC against 25,000 owed (deficit 5,000). The 8 WETH and 20,000 USDC that CoW
+never leave the settlement; only the residual crosses the trampoline.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as BYOS Driver
+    participant S as GPv2Settlement
+    participant T as Trampoline
+    participant R as Route venues
+
+    Note over D: Proposal signed offline by the sub-solver:<br/>executions, inflows 2 WETH, route, outflows 5,000 USDC
+    D->>S: settle(batch)
+    S->>S: pull 10 WETH from Alice, 20,000 USDC from Bob
+    Note over S: net position: 2 WETH surplus, 5,000 USDC deficit
+    S->>T: WETH.transfer(trampoline, 2) - the inflows
+    S->>T: execute(proposal, route, outflows, signature)
+    T->>T: caller, submitter, expiry, signature checks
+    T->>R: run route: swap 2 WETH for USDC
+    R-->>T: 5,000 USDC produced
+    T->>S: USDC.transfer(Settlement, 5000) - the outflow loop
+    S->>S: pay Alice 25,000 USDC, pay Bob 8 WETH
+    S-->>D: settle() succeeds
+```
+
+A shortfall anywhere in the outflow loop reverts the whole settlement, exactly as the
+single-order funding guard does today.
+
 ### Signed schema
 
 ```solidity
@@ -108,6 +146,35 @@ function execute(
 with `interactionsHash` and `outflowsHash` recomputed on-chain and the rest of the
 checks unchanged: settlement-only caller, submitter gate on `tx.origin`, `validUntil`
 expiry, ECDSA recovery to `SUB_SOLVER`.
+
+What each signed field buys, and where it is checked:
+
+```mermaid
+flowchart LR
+    subgraph SIG["Signed ProposalData"]
+        E["executionsHash"]
+        I["inflowsHash"]
+        X["interactionsHash"]
+        O["outflowsHash"]
+        V["validUntil"]
+        N["nonce"]
+    end
+    subgraph CHAIN["Enforced on-chain by execute"]
+        XC["route matches what the sub-solver signed"]
+        OC["settle-back tokens and amounts match"]
+        VC["proposal not expired"]
+    end
+    subgraph DISPUTE["Evidence in disputes, never decoded on-chain"]
+        EC["per-order outcomes vs settle calldata"]
+        IC["promised funding vs actual transfers-in"]
+    end
+    X --> XC
+    O --> OC
+    V --> VC
+    E --> EC
+    I --> IC
+    N --> NC["unique salt, no enforcement - ADR-0005"]
+```
 
 ### Settle-back loop: dumb by design
 
