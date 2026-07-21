@@ -54,11 +54,13 @@ MAINNET_RPC_URL= forge test                    # skip fork tests
 ### Deploy
 
 ```bash
-ESCROW_OWNER=<address> ESCROW_OPERATOR=<address> forge script script/Deploy.s.sol --broadcast
+ESCROW_ADMIN=<address> ESCROW_OPERATOR=<address> BYOS_SUBMITTERS=<addr1>,<addr2> \
+  forge script script/Deploy.s.sol --broadcast
 ```
 
-Deploys the TrampolineFactory and the Escrow wired to it. Optional: `COOLDOWN_PERIOD`
-(default: 1 day) and `SETTLEMENT` (default: the canonical GPv2Settlement address).
+Deploys the TrampolineFactory and the Escrow wired to it. See
+[`script/Deploy.s.sol`](script/Deploy.s.sol) for the optional parameters and their
+defaults.
 
 ## License
 

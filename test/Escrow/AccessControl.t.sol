@@ -28,12 +28,21 @@ contract AccessControlTest is EscrowTestBase {
     vm.expectRevert(
       abi.encodeWithSelector(IAccessControlDefaultAdminRules.AccessControlInvalidDefaultAdmin.selector, address(0))
     );
-    new Escrow(ADMIN_TRANSFER_DELAY, address(0), op, submitter, COOLDOWN, makeAddr('settlement'), 'BYOS Escrow', 'BYOS');
+    new Escrow(
+      ADMIN_TRANSFER_DELAY,
+      address(0),
+      op,
+      _soloSubmitters(submitter),
+      COOLDOWN,
+      makeAddr('settlement'),
+      'BYOS Escrow',
+      'BYOS'
+    );
   }
 
   function test_constructor_reverts_zero_settlement() public {
     vm.expectRevert(IEscrow.Escrow_ZeroAddress.selector);
-    new Escrow(ADMIN_TRANSFER_DELAY, admin, op, submitter, COOLDOWN, address(0), 'BYOS Escrow', 'BYOS');
+    new Escrow(ADMIN_TRANSFER_DELAY, admin, op, _soloSubmitters(submitter), COOLDOWN, address(0), 'BYOS Escrow', 'BYOS');
   }
 
   // --- Admin functions ---

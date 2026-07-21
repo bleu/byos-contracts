@@ -46,30 +46,12 @@ Why not BYOS-unilateral:
 
 ### Submitter gating: `tx.origin` must hold the Escrow's SUBMITTER_ROLE
 
-The `msg.sender == GPv2Settlement` check alone does not establish *which solver*
-submitted the settlement. Once BYOS settles a proposal, its signature and route are
-public calldata, and while `validUntil` is live any other allow-listed CoW solver can
-carry a replayed `execute` in its own settlement — or front-run the original if it is
-visible in a public mempool. A replayed route that produces less than `buyAmount` pays
-the difference out of the instance's residue into the attacker's settlement buffer,
-where CoW slippage accounting credits it to them. Bounded (only residue is reachable),
-but real.
-
-`execute` therefore additionally requires `tx.origin` to hold the Escrow's
-`SUBMITTER_ROLE`. `tx.origin` is the right identity signal here: GPv2Settlement exposes
-no "current solver" context on-chain, CoW solvers submit `settle()` from an EOA that is
-both `msg.sender` to the settlement and `tx.origin`, and EIP-7702 delegation preserves
-`tx.origin`. The classic `tx.origin` caveats (contract wallets, ERC-4337) don't apply
-because BYOS controls its own submission path.
-
-The allowed-submitter set lives on the Escrow as a role rather than as an immutable
-address because submitter rotation is a realistic event (key hygiene, multiple
-submission EOAs), and an immutable address would make rotation cascade: new factory →
-new EIP-712 domain (all outstanding signatures invalid) → new trampoline addresses →
-new Escrow. Role management is `DEFAULT_ADMIN_ROLE` only (the Owner multisig), so the
-operator's grief-only threat model is unchanged. To break the resulting circular
-constructor dependency, the Escrow deploys the factory from its own constructor:
-Escrow, factory, and EIP-712 domain form one deployment generation.
+Once BYOS settles a proposal, its signature and route are public calldata, so while
+`validUntil` is live any other allow-listed CoW solver could replay or front-run the
+`execute` in its own settlement and capture the instance's residue. `execute` therefore
+also requires `tx.origin` to hold the Escrow's grantable `SUBMITTER_ROLE` — granted at
+deploy time to the solver EOA and, for parallel submission through CoW's
+`Solver7702Delegate`, each approved auxiliary account.
 
 ### EIP-712 typed-data schema
 
@@ -117,8 +99,8 @@ instances. It is a natural singleton per chain, per deployment generation. Bindi
 the factory cleanly separates contract generations (v1 factory signatures don't verify
 against v2). Trampoline instances can hardcode or inherit the factory address (deployed
 by it), making on-chain verification straightforward. The factory itself is deployed by
-the Escrow's constructor (see submitter gating above), so a generation is anchored by
-its Escrow.
+the Escrow's constructor (avoiding a circular constructor dependency with the submitter
+role check), so a generation is anchored by its Escrow.
 
 ### Nonce semantics: unique salt, no enforcement
 
@@ -191,11 +173,17 @@ reject at gatekeeping, never patch.
 - **The signature address is load-bearing three ways.** One address is the proposal
   signer, the escrow key, and the Trampoline CREATE2 salt. Rotating a sub-solver key
   means a new escrow deposit and a new trampoline instance.
-- **BYOS must submit settlements directly from EOAs holding SUBMITTER_ROLE.** The
-  `tx.origin` gate ties submission to keys the Owner has granted; a submission path
-  where the originating EOA is not the granted key (e.g. a third-party relayer signing
-  with its own key) would fail the gate. Rotation is a `grantRole`/`revokeRole` on the
-  Escrow, not a redeploy.
+- **BYOS must submit settlements from EOAs holding SUBMITTER_ROLE.** The `tx.origin`
+  gate ties submission to keys the Owner has granted; a submission path where the
+  originating EOA is not a granted key (e.g. a third-party relayer signing with its own
+  key) would fail the gate. Rotation is a `grantRole`/`revokeRole` on the Escrow, not a
+  redeploy.
+- **The submitter set must stay in sync with the 7702 delegate's approved callers.**
+  `Solver7702Delegate`'s auxiliary accounts are immutable constructor arguments, so
+  rotating an auxiliary key or adding lanes means a new delegate deploy plus a fresh
+  EIP-7702 authorization — and matching `grantRole`/`revokeRole` calls on the Escrow.
+  This is a deployment-runbook item, not a contract change; an auxiliary account
+  missing its grant fails settlements at the Trampoline, it does not create risk.
 - **Trampoline execution now reads Escrow state.** The instances are no longer
   dependency-free: `execute` performs two staticcalls into the Escrow per settlement
   (role id + role check), and a compromised Owner could block settlements by revoking
