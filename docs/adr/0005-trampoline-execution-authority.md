@@ -48,19 +48,13 @@ Why not BYOS-unilateral:
 
 Once BYOS settles a proposal, its signature and route are public calldata, so while
 `validUntil` is live any other allow-listed CoW solver could replay or front-run the
-`execute` in its own settlement and capture the instance's residue. `execute` therefore
+`execute` in its own settlement — rerunning the signed route outside BYOS's control
+and muddying Track A attribution. `execute` therefore
 also requires `tx.origin` to hold the Escrow's grantable `SUBMITTER_ROLE` — granted at
 deploy time to the solver EOA and, for parallel submission through CoW's
 `Solver7702Delegate`, each approved auxiliary account.
 
 ### EIP-712 typed-data schema
-
-> Revised 2026-07-22 (see ADR-0003/0008 Revisions): the struct is unchanged — no new
-> typehash, no domain bump — but the amounts are raw pre-fee quotes. `sellAmount` is
-> the route's consumption (the fee wedge the user pays on top stays in the
-> settlement), and `buyAmount` is a floor enforced by a balance-delta check rather
-> than an exact settle-back. Disputes compare on-chain outcomes against the signed
-> amounts after applying the driver's deterministic fee shift.
 
 ```solidity
 struct ProposalData {
@@ -72,6 +66,14 @@ struct ProposalData {
     uint256 nonce;              // unique salt for signature uniqueness
 }
 ```
+
+Amounts are raw pre-fee quotes (until 2026-07-22 they were read as exact executed
+amounts; the struct itself is unchanged — no new typehash, no domain bump).
+`sellAmount` is the route's consumption — the fee wedge the user pays on top stays in
+the settlement — and `buyAmount` is a floor enforced by the balance-delta check
+([ADR-0003](0003-trampoline-deployment-settlement-integration.md)). Disputes compare
+on-chain outcomes against the signed amounts after applying the driver's deterministic
+fee shift.
 
 **`interactionsHash` is required.** Without it, BYOS could substitute different
 interactions while presenting the same signed amounts — accepting a valid proposal,
