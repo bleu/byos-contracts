@@ -56,12 +56,9 @@ off-chain (gatekeeping, eviction), not a contract mechanism.
 
 ### In-route capture is tolerated
 
-A sub-solver can still keep surplus by capturing it inside the route (sending part of
-the output to its own address before the sweep). This is accepted rather than
-prevented: it is bid-neutral, touches only value above the sub-solver's own signed
-floor, and guarding against it would reopen the filtered-approval arms race. Padding
-left uncaptured is a donation to BYOS; how tightly to quote is the sub-solver's own
-risk/competitiveness tradeoff.
+A sub-solver can keep surplus by capturing it in-route before the sweep. Accepted: it
+is bid-neutral, touches only value above its own signed floor, and guarding against it
+would reopen the filtered-approval arms race. Uncaptured padding is a donation to BYOS.
 
 ### What survives
 
@@ -73,11 +70,9 @@ instance is not a wallet" is now literal.
 ## Alternatives considered
 
 - **Sub-solver-reclaimable residue via claim functions** (this ADR's original
-  decision). Coherent while its premises held; each fell: surplus swept to the
-  settlement is returned to BYOS weekly rather than confiscated into a void, the DEX
-  persona is paid in-route rather than by leftovers, and the submitter gate closed the
-  replay window that made prompt claiming a doctrine. Removing the claims also deletes
-  an entry point and an event from the security-critical contract.
+  decision). Coherent while its premises held; the context above lists how each fell.
+  Removing the claims also deletes an entry point and an event from the
+  security-critical contract.
 - **Permissionless `sweep(token)` for strays, recipient hardcoded to the settlement.**
   No key and no theft surface, and BYOS would win most stray races. Dropped: strays
   are declared out of scope, and the function would exist only to chase donations and
