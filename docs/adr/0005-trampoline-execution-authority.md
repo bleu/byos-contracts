@@ -55,11 +55,18 @@ deploy time to the solver EOA and, for parallel submission through CoW's
 
 ### EIP-712 typed-data schema
 
+> Revised 2026-07-22 (see ADR-0003/0008 Revisions): the struct is unchanged — no new
+> typehash, no domain bump — but the amounts are raw pre-fee quotes. `sellAmount` is
+> the route's consumption (the fee wedge the user pays on top stays in the
+> settlement), and `buyAmount` is a floor enforced by a balance-delta check rather
+> than an exact settle-back. Disputes compare on-chain outcomes against the signed
+> amounts after applying the driver's deterministic fee shift.
+
 ```solidity
 struct ProposalData {
     bytes32 orderUidHash;      // keccak256(order_uid) — ties to a specific order
-    uint256 sellAmount;         // what the sub-solver expects to receive
-    uint256 buyAmount;          // what the sub-solver promises to deliver
+    uint256 sellAmount;         // route consumption the instance receives (raw, pre-fee)
+    uint256 buyAmount;          // floor the route must deliver to the settlement (raw, pre-fee)
     bytes32 interactionsHash;   // keccak256(abi.encode(interactions)) — the route
     uint256 validUntil;         // expiry timestamp
     uint256 nonce;              // unique salt for signature uniqueness

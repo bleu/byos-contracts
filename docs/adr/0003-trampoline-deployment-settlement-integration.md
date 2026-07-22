@@ -48,6 +48,11 @@ tx, handled as an infra failure (see below).
 
 ### Settlement value flow
 
+> Revised 2026-07-22: step 1 forwards the route's consumption (not the full user
+> `sellAmount` — the fee wedge stays in the settlement), and step 2's exact-amount
+> settle-back is superseded by a sweep plus balance-delta floor check. See the
+> Revision section below.
+
 BYOS encodes these intra-interactions (run as `GPv2Settlement`, after `sellAmount` has
 been pulled in):
 
@@ -86,6 +91,9 @@ route code cannot re-enter the settlement.
 
 ### Funding guard: the exact-amount transfer is the guard
 
+> Revised 2026-07-22: the guard is now a balance-delta assertion per the Revision
+> section below; the reasoning here still explains what the guard must prove.
+
 The buyAmount that funds the user must come from `Trampoline_S`'s own transfer of the
 exact required amount, never from `GPv2Settlement`'s commingled buffer. Because the
 trampoline is fund-less at rest (ADR-0001), its balance is exactly what the sub-solver's
@@ -108,6 +116,47 @@ view or a reorg) is BYOS's own infra failure, not the sub-solver's, so it must n
 trigger a Track-A escrow debit. The solver engine must distinguish "sub-solver route
 reverted" from "BYOS orchestration failed"
 ([ADR-0004](0004-penalty-schedule-and-attribution.md)).
+
+## Revision (2026-07-22): floors, delta-check guard, settlement custody
+
+Revised together with [ADR-0008](0008-residue-disposition.md)'s revision, after the
+CoW fee-mechanics review
+([docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md)). Three
+changes to the decision above; deployment, access control, and infra-failure
+attribution stand unchanged.
+
+- **Amounts are raw pre-fee quotes, and step 1 forwards route consumption.** The
+  CoW-run driver collects protocol/partner fees — and BYOS its gas cut — by shifting
+  only the clearing prices, downstream of the trampoline. `sellAmount` is what the
+  signed route consumes; whatever the user pays above it is never forwarded, so the
+  fee wedge accrues in `GPv2Settlement`, where the weekly accounting expects it.
+  `buyAmount` is likewise the raw quote from which the driver derives the user's
+  payout.
+- **`buyAmount` is a floor, enforced by a balance-delta check.** `execute` records
+  `GPv2Settlement`'s buy-token balance on entry, runs the route (interactions may pay
+  the settlement directly), sweeps the instance's full remaining balance of both
+  trade tokens to the settlement, and reverts unless the settlement's buy-token delta
+  covers `buyAmount`. The revert threshold is unchanged — an exact transfer of
+  `buyAmount` was already a floor (revert below, succeed at or above) — but
+  over-delivery and unconsumed sell tokens (buy orders over-provision their input)
+  now land in the settlement instead of stranding in the instance.
+- **Surplus custody moves to the settlement.** Delivery above the floor is BYOS-owned
+  slippage, returned weekly by CoW's accounting in native token. See ADR-0008's
+  revision for the rationale and for the removal of the claim functions.
+
+The commingled-payout rejection below still stands for the *unchecked* variant: the
+delta, not the settlement's absolute balance, is what proves fresh funds arrived — an
+absolute check would let BYOS's buffer silently mask a shortfall. The `balanceOf`
+delta-assertion dropped below as redundant becomes the guard; that is what allows
+routes to pay the settlement directly and the sweep to replace the exact transfer.
+Buffer safety is unchanged in kind: a sub-solver settlement can never net-drain
+BYOS's buffers, since the delta check reverts on shortfall exactly as the transfer
+did.
+
+The floor is the bid: the sub-solver signs the minimum it is sure to deliver, below
+its simulated route output. Margin sizing is its own tradeoff — too thin reverts and
+debits Track A, too thick loses auctions. Whether the proposal API suggests floors or
+filters thin ones is service policy, out of scope here.
 
 ## Non-goals
 

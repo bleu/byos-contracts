@@ -1,6 +1,48 @@
 # Residue disposition: sub-solver-reclaimable
 
-Status: accepted
+Status: accepted; decision inverted by the Revision of 2026-07-22
+
+## Revision (2026-07-22): surplus to the settlement, claims removed
+
+The decision below is inverted: residue stops existing as a category. Trigger: the
+CoW fee-mechanics review and the 2026-07-22 solvers-team meeting
+([docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md)), which
+changed the premises this ADR rested on.
+
+What changes:
+
+- `execute` sweeps the instance's full balance of both trade tokens to
+  `GPv2Settlement` and enforces `buyAmount` as a floor via a balance-delta check
+  ([ADR-0003](0003-trampoline-deployment-settlement-integration.md), Revision). The
+  instance ends every settlement holding none of the trade tokens; over-delivery and
+  unconsumed sell tokens are BYOS-owned settlement slippage, returned weekly by CoW's
+  accounting in native token.
+- `claimToken`/`claimTokens` are removed. The trampoline keeps zero privileged keys —
+  with nothing left to claim, nobody needs a key. This does not betray the
+  no-BYOS-key posture that anchored the original decision: that posture protected
+  *sub-solver assets*, and under the new custody there are none in the instance.
+- Stray tokens (mistaken transfers, airdrops, intermediate-token dust) are written
+  off. A sub-solver with a standing route-planted approval can take them; preventing
+  that is the un-enumerable approval-fighting ADR-0001 rejected, and the amounts at
+  stake are donations and dust — never user funds, trade capital, buffers, or
+  escrow, all protected by settlement atomicity and the floor check. If a sub-solver
+  skims strays, the response is off-chain (gatekeeping, eviction), not a contract
+  mechanism.
+
+Why the original incentive rationale no longer binds:
+
+- The sub-solver persona is a DEX or routing API paid by its own venue fees inside
+  the route, not by residue. Surplus above a floor it chose is not its compensation.
+- The floor is the bid: everything above it was never promised to anyone, and
+  in-route capture of it is bid-neutral — the original fear that sweeping "pushes
+  capture in-route" is accepted rather than prevented, since such capture takes only
+  what the sub-solver could have kept by signing a higher floor.
+- The replay exposure that made parked residue urgent (COW-1151) was closed by the
+  submitter gate (#11); the prompt-claim doctrine it justified is moot.
+
+What survives unchanged: per-instance isolation, the storage-free instance,
+signature-gated execution, and "the instance is not a wallet" — now literally, since
+nothing rests there by design.
 
 ## Context
 

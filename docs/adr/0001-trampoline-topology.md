@@ -74,10 +74,13 @@ escrow-deposit time, paid by the sub-solver) is settled in
 
 ### Allowance hygiene and desired execution
 
-> Since acceptance, the sweep post-condition below (steps 3–4) was superseded by
-> [ADR-0008](0008-residue-disposition.md): `execute` settles back exactly `buyAmount`
-> and any remainder is residue, reclaimable by the sub-solver. The enforced invariant is
-> no *protocol* balance at rest, not zero balance.
+> Since acceptance, the disposition of leftovers has moved twice.
+> [ADR-0008](0008-residue-disposition.md) first superseded the sweep post-condition
+> below (steps 3–4) with sub-solver-reclaimable residue; its Revision of 2026-07-22
+> restores the sweep in floor-plus-delta-check form: `execute` sweeps both trade
+> tokens to `GPv2Settlement` and asserts the settlement's buy-token delta covers
+> `buyAmount`. Zero trade-token balance at rest is again the enforced post-condition;
+> stray tokens are written off (ADR-0008, Revision).
 
 The leak-prevention control is the sweep, and it is required regardless of topology:
 
