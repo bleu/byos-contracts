@@ -1,9 +1,13 @@
 # Order flow: settlement through a trampoline
 
 How a single order flows through `GPv2Settlement` and a sub-solver's `Trampoline`
-instance, and how the three outcomes differ. Complements
+instance, and how the outcomes differ. Complements
 [ADR-0003](adr/0003-trampoline-deployment-settlement-integration.md) (value flow, funding
-guard) and [ADR-0008](adr/0008-residue-disposition.md) (residue).
+guard) and [ADR-0008](adr/0008-residue-disposition.md) (surplus custody).
+
+> Describes the revised design of 2026-07-22: `buyAmount` is a floor enforced by a
+> balance-delta check, and the instance sweeps both trade tokens back to the Settlement.
+> The Trampoline contract rework to match is a follow-up implementation PR.
 
 ## Actors
 
@@ -16,17 +20,26 @@ guard) and [ADR-0008](adr/0008-residue-disposition.md) (residue).
 - **Route venues** — the DEXes the route hits.
 - **Sub-solver** — signs the route offline (EIP-712), never executes on-chain.
 
-The funding transfer and the settle-back are separate interactions because they run in
+The funding transfer and `execute` are separate interactions because they run in
 different `msg.sender` contexts: the transfer-in runs as the Settlement (which owns the
-funds), `execute` runs as the Trampoline. That split keeps the route from ever holding the
-Settlement's spend authority.
+funds), the route runs as the Trampoline. That split keeps the route from ever holding
+the Settlement's spend authority.
+
+Inside `execute`, the trampoline records the Settlement's buy-token balance, runs the
+sub-solver's route, sweeps its own full remaining balance of both trade tokens to the
+Settlement, and reverts unless the Settlement's buy-token balance grew by at least
+`buyAmount` — the signed floor. The sweep and the check are trampoline contract code;
+the sub-solver supplies only the route.
 
 ---
 
-## Happy path: route delivers at least `buyAmount`
+## Happy path: route delivers at least the floor
 
-Route produces enough buy token, trampoline sends back exactly `buyAmount`, Settlement
-pays the user, BYOS's buffer nets to zero.
+The route produces at least `buyAmount` of buy token. The sweep pushes everything the
+instance holds back to the Settlement, the delta check passes, the Settlement pays the
+user, and BYOS's buffer nets to zero. Anything above the floor is not stranded and not
+sub-solver property: it sits in the Settlement as BYOS-owned slippage, returned by CoW's
+weekly accounting.
 
 ```mermaid
 sequenceDiagram
@@ -40,22 +53,29 @@ sequenceDiagram
     D->>S: settle(batch)
     S->>S: pull user sellAmount into Settlement
     S->>T: sellToken.transfer(trampoline, sellAmount)
-    S->>T: execute(proposal, route, buyToken, signature)
-    T->>T: onlySettlement + validUntil + signature checks
+    S->>T: execute(proposal, route, sellToken, buyToken, signature)
+    T->>T: onlySettlement + submitter + validUntil + signature checks
+    T->>T: record Settlement's buyToken balance
     T->>R: run route interactions
     R-->>T: buyToken produced (>= buyAmount)
-    T->>S: buyToken.transfer(Settlement, buyAmount)
+    T->>S: sweep full buyToken + sellToken balances
+    T->>T: assert Settlement buyToken delta >= buyAmount
     S->>S: transferToAccounts pays the user
     S-->>D: settle() succeeds
+    Note over S: anything above the floor stays here as<br/>BYOS-owned slippage, returned weekly
 ```
+
+A route may also deliver output to the Settlement directly instead of to the instance;
+the delta check measures what the Settlement actually received, so both shapes pass.
 
 ---
 
-## Shortfall: route delivers less than `buyAmount`
+## Shortfall: route delivers less than the floor
 
-The settle-back transfer has insufficient balance and reverts, reverting the whole
-settlement. No trade, BYOS's buffer untouched — the transfer's own revert is the funding
-guard, no separate balance check.
+The delta check fails and reverts the whole settlement. No trade, BYOS's buffer
+untouched. The revert threshold is the same as the old exact-amount transfer — below
+`buyAmount` nothing settles — but the guard is now an explicit assertion on the
+Settlement's balance growth, not the transfer's own insufficient-balance revert.
 
 ```mermaid
 sequenceDiagram
@@ -67,64 +87,61 @@ sequenceDiagram
 
     D->>S: settle(batch)
     S->>T: sellToken.transfer(trampoline, sellAmount)
-    S->>T: execute(proposal, route, buyToken, signature)
+    S->>T: execute(proposal, route, sellToken, buyToken, signature)
+    T->>T: record Settlement's buyToken balance
     T->>R: run route interactions
     R-->>T: buyToken produced (< buyAmount)
-    T--xS: buyToken.transfer reverts (ERC20InsufficientBalance)
+    T->>S: sweep full buyToken + sellToken balances
+    T--xT: delta check fails: balance grew less than buyAmount
     S--xD: settle() reverts, no state change
-    Note over D: buffer never net-drained, sub-solver eats the Track A debit
+    Note over D: buffer never net-drained,<br/>sub-solver eats the Track A debit
 ```
-
-Covered by `test_execute_reverts_when_route_produces_less_than_buy_amount` and the fuzz
-test `testFuzz_execute_settles_back_iff_route_output_covers_buy_amount` in
-`test/Trampoline/Trampoline.t.sol`.
 
 ---
 
-## Surplus: route delivers more than `buyAmount`
+## Buy order: unconsumed input comes back
 
-Trampoline still sends back exactly `buyAmount`. The surplus stays as residue, which the
-sub-solver reclaims later in their own transaction. Residue is the sub-solver's property,
-outside the collateral model ([ADR-0008](adr/0008-residue-disposition.md)).
+Same mechanism, different slack. A buy order fixes the user's output, so the input is
+over-provisioned: the full signed `sellAmount` is pushed in, the route consumes only what
+it needs, and the sweep returns the unconsumed sell token to the Settlement along with
+the output. The delta check is identical — the Settlement's buy-token balance must grow
+by at least the floor, which for a buy order covers the user's exact `buyAmount`.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant SS as Sub-solver
     participant D as BYOS Driver
     participant S as GPv2Settlement
     participant T as Trampoline
     participant R as Route venues
 
     D->>S: settle(batch)
-    S->>T: sellToken.transfer(trampoline, sellAmount)
-    S->>T: execute(proposal, route, buyToken, signature)
-    T->>R: run route interactions
-    R-->>T: buyToken produced (> buyAmount)
-    T->>S: buyToken.transfer(Settlement, buyAmount)
-    Note over T: exact amount only, surplus stays behind
-    S->>S: transferToAccounts pays the user
+    S->>S: pull user's executed sell amount<br/>(fee wedge included, stays in Settlement)
+    S->>T: sellToken.transfer(trampoline, sellAmount) — raw signed input
+    S->>T: execute(proposal, route, sellToken, buyToken, signature)
+    T->>R: run route: consumes part of the input
+    R-->>T: buyToken produced (>= buyAmount)
+    T->>S: sweep: all buyToken + unconsumed sellToken
+    T->>T: assert Settlement buyToken delta >= buyAmount
+    S->>S: transferToAccounts pays the user exactly buyAmount
     S-->>D: settle() succeeds
-
-    SS->>T: claimToken(buyToken, recipient)
-    T->>SS: transfer full residue balance (emits ResidueClaimed)
 ```
 
-Exercised by `test_execute_leaves_surplus_in_instance_as_residue` in
-`test/Trampoline/Trampoline.t.sol`. Operational note (ADR-0008): the instance is not a
-wallet — claim promptly and keep `validUntil` short, since unclaimed residue is exposed to
-allow-listed-solver replay until the proposal expires.
+Where the fee wedge sits for each order kind, with worked numbers, is in
+[docs/reference/cow-fee-collection.md](reference/cow-fee-collection.md).
 
 ---
 
-## The three outcomes at a glance
+## The outcomes at a glance
 
-| Route output vs `buyAmount` | Settle-back | Settlement | Sub-solver residue |
+| Route delivery vs floor | Delta check | Settlement | Extras (surplus, unconsumed input) |
 | --- | --- | --- | --- |
-| Equal | sends `buyAmount` | succeeds | none |
-| Greater | sends `buyAmount` | succeeds | surplus, claimable |
-| Less | reverts | reverts | n/a (no trade) |
+| Exactly the floor | passes | succeeds | none |
+| Above the floor | passes | succeeds | swept to the Settlement; BYOS-owned slippage, returned weekly |
+| Below the floor | reverts | reverts | n/a — no trade |
 
-The settle-back is trampoline contract code parameterized by BYOS-supplied
-`(buyToken, buyAmount)`, not a sub-solver interaction — so a malicious sub-solver cannot
-omit or redirect it (see `Trampoline.execute`, `src/contracts/Trampoline.sol:82-87`).
+The sweep and the delta check are trampoline contract code parameterized by the
+BYOS-supplied tokens and the signed floor, not sub-solver interactions — a malicious
+sub-solver cannot omit or redirect them. The instance ends every settlement holding none
+of the trade tokens, so ADR-0001's "the instance is not a wallet" is literal: a planted
+approval over an empty contract drains nothing.
