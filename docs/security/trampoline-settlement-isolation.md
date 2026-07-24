@@ -11,9 +11,10 @@ backs with tests, what such a route can and cannot reach.
 The guarantee is structural rather than filtered. Routes execute as the Trampoline
 instance (`msg.sender` is the instance), never as `GPv2Settlement`, so they inherit none
 of the settlement's buffer-spend or approval-granting authority ([ADR-0001](../adr/0001-trampoline-topology.md)).
-The Trampoline holds no funds at rest beyond its own sub-solver's residue, and each
-sub-solver has a distinct instance, so the blast radius of any route is that one
-instance's leftovers.
+`execute` sweeps the instance's full remaining balance of both trade tokens to the
+settlement ([ADR-0008](../adr/0008-residue-disposition.md)), so the instance is empty of
+trade tokens at rest, and each sub-solver has a distinct instance. The blast radius of
+any route is the trade capital in flight during its own settlement.
 
 The tests demonstrate this against the **real deployed `GPv2Settlement`** on a mainnet
 fork, not a mock — the point is to exercise CoW's actual semantics (allowance checks,
@@ -32,12 +33,12 @@ adversary wants the settlement to complete unattributed rather than self-abort.
 
 | Target | Reachable by a route | Why | Backing |
 | --- | --- | --- | --- |
-| Own instance residue | **yes** | The route runs as the instance, so it moves the instance's own balance freely. This is the boundary's positive edge, and isolation is instance-scoped, not token-scoped: a route reaches its own residue while the settlement's buffer of the same token stays put. | Cited: `test_planted_approval_cannot_reach_other_instances_residue` (`test/Trampoline/Trampoline.t.sol`, PR #4) |
+| Own instance balance, in flight | **yes** | The route runs as the instance, so during its own settlement it moves the instance's balance freely. This is the boundary's positive edge, and isolation is instance-scoped, not token-scoped: a route reaches the capital passing through its own instance while the settlement's buffer of the same token stays put. At rest there is nothing left to reach — the sweep empties the instance of trade tokens, so a planted approval drains nothing. | Cited: `test_execute_sweeps_full_route_output_and_emits_executed`, `test_execute_buy_order_sweeps_unconsumed_sell_token_to_settlement`, `test_planted_approval_cannot_reach_other_instances_residue` (`test/Trampoline/Trampoline.t.sol`) |
 | Settlement token buffers | no | A `transferFrom` from the settlement needs an allowance the settlement never granted the instance. Proven inside a *successful* settlement where the failed attempt is swallowed, so the guarantee holds even when the transaction finalizes rather than aborting. | `test_settlement_succeeds_but_buffer_transferFrom_moves_nothing` |
 | Settlement via re-entering `settle()` | no | `settle` is `nonReentrant onlySolver`. A route always runs inside a live `settle`, so the reentrancy guard (the first modifier) reverts before `onlySolver` is even reached. `onlySolver` is the backstop that applies if the guard weren't engaged — the instance is not an allow-listed solver. | `test_route_cannot_reenter_settle` (guard), `test_route_settle_call_is_rejected_by_onlySolver` (backstop) |
 | Another party's order state | no | `setPreSignature` and `invalidateOrder` require the order's encoded owner to equal `msg.sender`. A route is the instance, so it cannot pre-sign or cancel an order owned by anyone else; the victim's state is unchanged. A route can pre-sign an order it *owns*, but nobody places orders naming a Trampoline, so that capability is inert. | `test_route_cannot_presign_another_owners_order`, `test_route_cannot_invalidate_another_owners_order` |
 | Vault-relayer allowances (user funds) | no | The vault relayer pulls users' sell tokens and is `onlyCreator` — only the settlement may call it. A route calling it is rejected at the gate even against a user who really approved the relayer. | `test_route_cannot_pull_through_vault_relayer` |
-| Other instances' residue | no | Cross-instance isolation is a property of per-instance EVM storage; an approval or call from one instance grants nothing over another's balance. | Cited: `test_route_cannot_call_another_instances_execute`, `test_planted_approval_cannot_reach_other_instances_residue`, `test_signature_from_other_factory_generation_fails` (`test/Trampoline/Trampoline.t.sol`, PR #4) |
+| Other instances' balances | no | Cross-instance isolation is a property of per-instance EVM storage; an approval or call from one instance grants nothing over another's balance (instances end settlements swept empty, but a stray token could still land outside the flow). | Cited: `test_route_cannot_call_another_instances_execute`, `test_planted_approval_cannot_reach_other_instances_residue`, `test_signature_from_other_factory_generation_fails` (`test/Trampoline/Trampoline.t.sol`) |
 | Escrow collateral | no | Collateral lives in the `Escrow` contract, which never routes funds through a Trampoline; payouts are gated to escrow's own access-controlled roles, unreachable from a route. | Cited: `test/Escrow/AccessControl.t.sol`, `test/Escrow/SubSolverActions.t.sol` |
 
 Two directions are deliberately inert rather than blocked, because they move value
