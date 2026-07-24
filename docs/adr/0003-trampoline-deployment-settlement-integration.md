@@ -148,6 +148,14 @@ buy token for sell orders, sell token for buy orders — but that is the driver'
 shift, downstream of and invisible to the trampoline; worked examples for both kinds
 are in [docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md).
 
+The mechanism also covers same-token hook orders (`sellToken == buyToken`, always with
+`sellAmount > buyAmount`), where the user submits the order mainly to run hooks and
+the difference funds them. The delta check stays sound because the snapshot is taken
+after the funding transfer has already left `GPv2Settlement`: the sweep returning the
+unconsumed input is the delivery it measures, and the floor still guarantees the
+settlement is never net-drained. The shared token is swept once; `execute` must not
+reject equal addresses.
+
 ### Infra-failure attribution
 
 A settlement that reverts because the trampoline was not deployed (a stale off-chain
