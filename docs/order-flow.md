@@ -5,10 +5,6 @@ instance, and how the outcomes differ. Complements
 [ADR-0003](adr/0003-trampoline-deployment-settlement-integration.md) (value flow, funding
 guard) and [ADR-0008](adr/0008-residue-disposition.md) (surplus custody).
 
-> Describes the revised design of 2026-07-22: `buyAmount` is a floor enforced by a
-> balance-delta check, and the instance sweeps both trade tokens back to the Settlement.
-> The Trampoline contract rework to match is a follow-up implementation PR.
-
 ## Actors
 
 - **BYOS Driver** — builds and submits the settlement, authoring the funding transfer and
@@ -73,9 +69,9 @@ the delta check measures what the Settlement actually received, so both shapes p
 ## Shortfall: route delivers less than the floor
 
 The delta check fails and reverts the whole settlement. No trade, BYOS's buffer
-untouched. The revert threshold is the same as the old exact-amount transfer — below
-`buyAmount` nothing settles — but the guard is now an explicit assertion on the
-Settlement's balance growth, not the transfer's own insufficient-balance revert.
+untouched. Below `buyAmount` nothing settles: the guard is an explicit assertion on
+the Settlement's balance growth, so it also catches routes that deliver output
+somewhere other than the Settlement.
 
 ```mermaid
 sequenceDiagram

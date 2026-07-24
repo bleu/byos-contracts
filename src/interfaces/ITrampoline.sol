@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @dev Marker address GPv2 uses for orders buying native ETH (GPv2Order.BUY_ETH_ADDRESS).
- * Settle-back sends native ETH instead of ERC-20.
+ * The sweep and the balance-delta check run in native ETH instead of ERC-20.
  */
 address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 

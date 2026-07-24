@@ -464,7 +464,7 @@ contract TrampolineTest is Test {
   function test_execute_passes_value_in_interactions() public {
     MockWETH weth = new MockWETH();
     // ETH sitting in the instance mid-route (e.g. from an ETH-paying venue);
-    // the signed route wraps it and settles back as WETH.
+    // the signed route wraps it and the sweep returns it as WETH.
     vm.deal(address(trampoline), BUY_AMOUNT);
 
     ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);

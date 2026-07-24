@@ -80,7 +80,7 @@ balance.
 The sweep and the floor check are trampoline contract code, rather than
 sub-solver-authored interactions. That distinction is essential, because a malicious
 sub-solver could otherwise omit or redirect the value return. The sub-solver supplies
-only the `route`; the settle-back is enforced by the immutable trampoline logic. This is
+only the `route`; the value return is enforced by the immutable trampoline logic. This is
 the same posture as the preventive approve-authoring layer in
 [ADR-0001](0001-trampoline-topology.md): BYOS authors the value-moving calls, and the
 sub-solver supplies only the route.
