@@ -98,7 +98,9 @@ contract Trampoline is ITrampoline {
     }
 
     _sweep(_buyToken);
-    _sweep(_sellToken);
+    // Same-token hook orders (sellToken == buyToken) sweep once: the returned
+    // unconsumed input is the delivery the delta check measures.
+    if (_sellToken != _buyToken) _sweep(_sellToken);
 
     uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
     if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
@@ -119,8 +121,7 @@ contract Trampoline is ITrampoline {
 
   /**
    * @notice Transfers the instance's full balance of `_token` to the settlement
-   * @dev Skips zero balances: some tokens revert on zero-value transfers, and when
-   * the trade's tokens are the same address the second sweep must be a no-op
+   * @dev Skips zero balances: some tokens revert on zero-value transfers
    * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
    */
   function _sweep(
