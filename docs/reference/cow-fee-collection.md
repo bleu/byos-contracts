@@ -24,7 +24,7 @@ the protocol computes off-chain who owes what and settles up.
 
 | Fee | What it covers | Who receives it | How the amount is set |
 |---|---|---|---|
-| Network fee | Gas of the settlement | The solver (it keeps its own cut) | Solver's own cut, typically in the sell token; the protocol does **not** reimburse gas |
+| Network fee | Gas of the settlement | The solver — the cut parks in the settlement's buffers and reaches the solver through the weekly payout, in native token | Solver's own cut, typically in the sell token; the protocol does **not** reimburse gas |
 | Protocol fee | CoW DAO revenue | CoW DAO | Fee policies attached to each order by the autopilot (surplus %, volume %, price improvement) |
 | Partner fee | Integrator revenue | The partner | Declared in the order's appData, capped by the protocol |
 
@@ -32,48 +32,65 @@ Orders sign `feeAmount = 0` since the 2023 fee-model change. The `feeAmount` fie
 proportional-scaling math still exist in `GPv2Settlement.sol` but are a dead path for new orders.
 All three fee types above travel the same physical route: a wedge in the executed prices.
 
-## Where the fee lives in one settlement
+## One order, end to end (a sell order)
 
-A concrete single-order example. User sells 1 WETH for USDC, limit price 2,400. The solver's
-route delivers 2,500 USDC. The solver charges 20 USDC of total fees by quoting the user 2,480.
+One concrete example threaded through every component. The user sells 1 WETH for USDC with a
+limit price of 2,400. The best route delivers 2,500 USDC. Total fees come to 20 USDC.
+
+1. The user signs the order — sell 1 WETH, receive at least 2,400 USDC, `feeAmount = 0` — and
+   posts it to the orderbook API.
+2. The autopilot puts the order into the next auction, attaching the fee policies (protocol
+   surplus/volume fee, any partner fee from appData) and a native ETH price per token, and
+   broadcasts the auction to all solvers.
+3. The solver engine finds the route: 1 WETH in, 2,500 USDC out. It reports these raw amounts
+   to its driver. The engine can be completely oblivious to fees.
+4. The driver applies the fee policies by shifting only the clearing prices, so the user's
+   executed amount becomes 2,480 USDC; the route calldata is untouched. The 20 USDC gap covers
+   protocol and partner fees plus the solver's own gas cut, which the driver sizes the same
+   way. It bids with score = user surplus + protocol fees.
+5. The autopilot picks the winning bid and the driver submits `settle()`.
+6. `GPv2Settlement` executes: pull 1 WETH from the user via the vault relayer, run the route
+   interactions (2,500 USDC arrive in the contract), pay the user 2,480 USDC. The contract
+   checks exactly two things — the user got at least their limit price, and the caller is an
+   allow-listed solver. The 20 USDC difference just stays in the contract's ERC20 balance;
+   that residual **is** the fee. No transfer, no recipient, no event. It sits commingled with
+   everything else (the "buffers"), and solvers may even spend buffer balances as liquidity in
+   later settlements.
+7. The autopilot observes the settlement on-chain, decodes the calldata, matches it to the
+   promised solution, and recomputes surplus and the fee breakdown from the executed amounts
+   plus the auction's fee policies. Solver reporting is not trusted. The per-trade result is
+   stored and public on Dune.
+8. The weekly accounting (Tuesday 00:00 UTC to Tuesday 00:00 UTC) nets per solver: rewards,
+   minus penalties, minus protocol and partner fees, plus the solver-owned imbalances its
+   settlements created (gas cuts, slippage) converted to native token. Net positive pays out;
+   net negative is recorded as an overdraft, backed by the bond.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant U as User
+    participant AP as Orderbook / Autopilot
+    participant D as Driver
+    participant E as Solver engine
     participant S as GPv2Settlement
-    participant R as Route (AMM/DEX)
+    participant W as Weekly accounting
 
-    Note over S: solver encoded clearing prices<br/>so the user receives 2,480 USDC
-    S->>U: pull 1 WETH (via allowance / vault relayer)
-    S->>R: interaction: swap 1 WETH
-    R-->>S: 2,500 USDC
-    S->>U: pay 2,480 USDC
+    U->>AP: sign + post order: sell 1 WETH,<br/>min 2,400 USDC, feeAmount = 0
+    AP->>D: auction: order + fee policies + native prices
+    D->>E: order
+    E->>D: raw solution: route turns 1 WETH into 2,500 USDC
+    D->>D: apply fee policies: shift clearing prices<br/>so the user receives 2,480 (route untouched)
+    D->>AP: bid, score = surplus + protocol fees
+    AP-->>D: auction won
+    D->>S: settle()
+    S->>U: pull 1 WETH (vault relayer)
+    S->>S: run route interactions: 2,500 USDC arrive
+    S->>U: pay 2,480 USDC (limit price checked on-chain)
     Note over S: 20 USDC remain in the contract.<br/>That residual balance IS the fee.<br/>No transfer, no recipient, no event.
-```
-
-The contract enforces exactly two things here: the user gets at least their limit price, and the
-caller is an allow-listed solver. It never checks that a fee was charged, how big it is, or where
-it goes. The 20 USDC just sits in the contract's ERC20 balance, commingled with everything else
-(the "buffers"). Solvers may even spend buffer balances as liquidity in later settlements.
-
-## How the solver charges the wedge
-
-The wedge is encoded in the clearing-price vector of `settle()`. Solvers report uniform clearing
-prices (fee-free exchange rates) plus, when needed, per-trade custom prices that shift an
-individual order's execution off the uniform price. The gap between the two is that order's fee.
-
-```mermaid
-flowchart LR
-    subgraph OFFCHAIN["Off-chain, before settlement"]
-        O["User signs order<br/>feeAmount = 0"] --> AP["Autopilot builds auction:<br/>orders + fee policies + native prices"]
-        AP --> DR["Driver applies fee policies:<br/>shifts executed amounts<br/>down by network + protocol + partner fee"]
-        DR --> SC["Reported solution<br/>score = surplus + protocol fees"]
-    end
-    subgraph ONCHAIN["On-chain settle()"]
-        CP["Clearing prices encode the wedge"] --> W["Wedge remains as<br/>Settlement contract balance"]
-    end
-    SC -->|"wins auction"| CP
+    AP->>AP: decode tx, recompute surplus + fee breakdown
+    AP->>W: week's settlements (Tue 00:00 UTC to Tue 00:00 UTC)
+    W->>W: net per solver: rewards − penalties − fees<br/>+ solver-owned imbalances, in native token
+    W->>D: solver payout in native token<br/>(or overdraft if negative)
 ```
 
 Two consequences of the score formula worth remembering:
@@ -85,36 +102,47 @@ Two consequences of the score formula worth remembering:
   executed prices and the fee policies. Whether the solver actually kept a wedge only decides
   whether the debt is covered by retained balance or comes out of the solver's own rewards.
 
-## Enforcement: recompute, net, backstop
+## The same trade as a buy order
 
-Nothing about fees is enforced by the contract. Enforcement is ex-post accounting against money
-the solver is owed, with the bond and the allow-list behind it.
+The mechanism does not change with the order kind — only the side the wedge sits on. Suppose the
+user instead signs a buy order: receive exactly 2,400 USDC, pay at most 1 WETH. The route needs
+0.96 WETH to produce 2,400 USDC, and the same 20 USDC of fees is now 0.008 WETH.
+
+The driver shifts the sell side of the price instead: the user pays 0.968 WETH, the route
+consumes 0.96, and 0.008 WETH never leaves the contract. The user receives exactly the 2,400
+USDC they signed for.
 
 ```mermaid
 sequenceDiagram
     autonumber
+    participant U as User
     participant S as GPv2Settlement
-    participant AP as Autopilot
-    participant DB as Database / Dune
-    participant W as Weekly accounting
-    participant SOL as Solver
-    participant DAO as CoW DAO / Partners
+    participant R as Route (AMM/DEX)
 
-    S-->>AP: settlement tx observed on-chain
-    AP->>AP: decode calldata, match to promised solution<br/>(find_winning_solution_uid)
-    AP->>AP: recompute surplus + fee_breakdown<br/>from executed amounts + auction fee policies
-    AP->>DB: store per-trade fees (public on Dune)
-    DB->>W: week's settlements (Tue 00:00 UTC → Tue 00:00 UTC)
-    W->>W: net per solver: rewards − penalties<br/>− protocol fees − partner fees<br/>+ remaining solver-owned imbalances<br/>(gas cuts, slippage) converted to native token
-    alt net positive
-        W->>SOL: payout
-        W->>DAO: protocol + partner fees
-    else net negative
-        W->>SOL: no payout — overdraft recorded<br/>(repay via overdrafts contract)
-    end
+    Note over S: clearing prices shifted so<br/>the user pays 0.968 WETH
+    S->>U: pull 0.968 WETH (vault relayer)
+    S->>R: interaction: swap 0.96 WETH
+    R-->>S: 2,400 USDC
+    S->>U: pay exactly 2,400 USDC
+    Note over S: 0.008 WETH remain in the contract.<br/>The wedge is in the sell token.
 ```
 
-The layers, inside-out:
+Side by side:
+
+| | Sell order | Buy order |
+|---|---|---|
+| User fixes | the input: 1 WETH | the output: 2,400 USDC |
+| Driver's price shift | proceeds down: route delivers 2,500, user receives 2,480 | payment up: route consumes 0.96 WETH, user pays 0.968 |
+| Wedge sits in | buy token (USDC) | sell token (WETH) |
+| Contract's limit check | received ≥ 2,400 USDC | paid ≤ 1 WETH |
+
+Everything after `settle()` — recompute, weekly netting — is identical for both kinds.
+
+## Enforcement layers
+
+Nothing about fees is enforced by the contract. Enforcement is ex-post accounting (steps 7 and 8
+above) against money the solver is owed, with the bond and the allow-list behind it. The layers,
+inside-out:
 
 ```mermaid
 flowchart TD
@@ -135,7 +163,7 @@ bond — which is why solver onboarding is permissioned.
 | Step | Actor | On-chain? |
 |---|---|---|
 | Decide the fee amount per order | Autopilot (fee policies) + solver (network fee) | No |
-| Separate the fee from the user's proceeds | Solver, via clearing prices | Encoded in calldata; not checked |
+| Separate the fee from the user's proceeds | The driver, by shifting clearing prices — the settlement contract has no fee logic and never checks the split | Encoded in calldata; not checked |
 | Hold the fee | `GPv2Settlement` buffers, commingled | Yes, passively |
 | Compute what each solver owes | Autopilot, from decoded calldata | No |
 | Collect | Weekly accounting: withheld from payouts, transferred to DAO/partners | One accounting tx per week |
