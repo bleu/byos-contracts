@@ -41,14 +41,6 @@ interface ITrampoline {
    */
   event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor);
 
-  /**
-   * @notice The sub-solver has claimed residue from its instance (ADR-0008)
-   * @param _token The claimed token (BUY_ETH_ADDRESS for native ETH)
-   * @param _amount The full balance transferred out
-   * @param _recipient The address that received the claimed balance
-   */
-  event ResidueClaimed(address indexed _token, uint256 _amount, address indexed _recipient);
-
   /*///////////////////////////////////////////////////////////////
                               STRUCTS
   //////////////////////////////////////////////////////////////*/
@@ -121,16 +113,6 @@ interface ITrampoline {
    */
   error Trampoline_EthSettleBackFailed();
 
-  /**
-   * @notice Throws if claim was called by someone else than the sub-solver
-   */
-  error Trampoline_OnlySubSolver();
-
-  /**
-   * @notice Throws if the native ETH claim transfer fails
-   */
-  error Trampoline_EthClaimFailed();
-
   /*///////////////////////////////////////////////////////////////
                              VARIABLES
   //////////////////////////////////////////////////////////////*/
@@ -197,30 +179,5 @@ interface ITrampoline {
     address _sellToken,
     address _buyToken,
     bytes calldata _signature
-  ) external;
-
-  /**
-   * @notice Transfers the instance's full balance of `_token` to `_recipient`
-   * @dev Residue is the sub-solver's property (ADR-0008). The instance is storage-free
-   * and cannot enumerate what it holds; the caller identifies tokens off-chain. Use
-   * BUY_ETH_ADDRESS to claim native ETH. Residue is at risk to allow-listed-solver
-   * replay while any signed proposal for this instance is unexpired — claim promptly.
-   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
-   * @param _recipient The address receiving the claimed balance
-   */
-  function claimToken(
-    address _token,
-    address _recipient
-  ) external;
-
-  /**
-   * @notice Transfers the instance's full balance of each listed token to `_recipient`
-   * @dev Batch form of claimToken; same semantics per token
-   * @param _tokens The tokens to claim; full balance each, BUY_ETH_ADDRESS for native ETH
-   * @param _recipient The address receiving the claimed balances
-   */
-  function claimTokens(
-    address[] calldata _tokens,
-    address _recipient
   ) external;
 }
