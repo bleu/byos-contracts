@@ -7,7 +7,7 @@ Solidity contracts for the **Bring Your Own Solver (BYOS)** project — a bonded
 | Contract | Status | Description |
 |----------|--------|-------------|
 | [Escrow](src/contracts/Escrow.sol) | implemented | Per-chain, native-token collateral keyed by sub-solver address. Deposits, debits (Track A revert penalties / Track B EBBO passthrough), freeze/unfreeze, and all-or-nothing withdrawal with cooldown. First deposit for a sub-solver deploys its Trampoline. |
-| [Trampoline](src/contracts/Trampoline.sol) | implemented | Per-sub-solver execution sandbox: verifies the sub-solver's EIP-712 proposal signature (including the route hash and expiry), runs the signed route in a fund-less context, and settles back exactly `buyAmount` to `GPv2Settlement` (native ETH via the `0xeee…` marker). Immutable, no admin key. |
+| [Trampoline](src/contracts/Trampoline.sol) | implemented | Per-sub-solver execution sandbox: verifies the sub-solver's EIP-712 proposal signature (including the route hash and expiry), runs the signed route in a fund-less context, sweeps its full remaining balance of both trade tokens back to `GPv2Settlement` (native ETH via the `0xeee…` marker), and reverts unless the settlement's buy-token balance grew by at least the signed `buyAmount` floor. Immutable, no admin key. |
 | [TrampolineFactory](src/contracts/TrampolineFactory.sol) | implemented | CREATE2 deployer for Trampoline instances (salt = sub-solver address) and the EIP-712 domain anchor for proposal signatures. `ensureDeployed` is idempotent and permissionless. |
 
 ## Architecture
