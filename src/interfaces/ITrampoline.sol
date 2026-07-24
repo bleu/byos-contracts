@@ -22,13 +22,24 @@ bytes32 constant PROPOSAL_TYPEHASH = keccak256(
  * @author CoW Protocol Developers
  * @notice Per-sub-solver execution sandbox. Receives the trade's sell tokens from
  * GPv2Settlement, runs the sub-solver's EIP-712-signed route in a fund-less context,
- * and transfers exactly the promised buy amount back to the settlement contract.
- * One immutable instance per sub-solver at a deterministic CREATE2 address (ADR-0001).
+ * sweeps its full remaining balance of both trade tokens back to the settlement
+ * contract, and enforces the signed buy amount as a floor on the settlement's
+ * buy-token balance growth. One immutable instance per sub-solver at a deterministic
+ * CREATE2 address (ADR-0001).
  */
 interface ITrampoline {
   /*///////////////////////////////////////////////////////////////
                               EVENTS
   //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice A signed route executed and the settlement's buy-token balance growth
+   * covered the floor (ADR-0003)
+   * @param _orderUidHash Hash of the CoW order UID the proposal settles
+   * @param _delta The measured growth of the settlement's buy-token balance
+   * @param _floor The signed buyAmount the delta was checked against
+   */
+  event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor);
 
   /**
    * @notice The sub-solver has claimed residue from its instance (ADR-0008)
@@ -58,8 +69,9 @@ interface ITrampoline {
    * @notice The signed proposal fields (ADR-0005), minus interactionsHash which is
    * recomputed on-chain from the interactions actually being executed
    * @param orderUidHash Hash of the CoW order UID the proposal settles
-   * @param sellAmount The sell amount the route consumes
-   * @param buyAmount The buy amount settled back to the settlement contract
+   * @param sellAmount The sell amount pushed into the instance for the route
+   * @param buyAmount The floor: the minimum growth of the settlement's buy-token
+   * balance execute enforces
    * @param validUntil Timestamp after which the proposal is no longer executable
    * @param nonce Sub-solver-chosen value distinguishing otherwise identical proposals
    */
@@ -97,7 +109,15 @@ interface ITrampoline {
   error Trampoline_InvalidSignature();
 
   /**
-   * @notice Throws if the native ETH settle-back transfer fails
+   * @notice Throws if the settlement's buy-token balance grew by less than the
+   * signed floor
+   * @param _delta The measured growth of the settlement's buy-token balance
+   * @param _floor The signed buyAmount required
+   */
+  error Trampoline_FloorNotMet(uint256 _delta, uint256 _floor);
+
+  /**
+   * @notice Throws if the native ETH sweep to the settlement fails
    */
   error Trampoline_EthSettleBackFailed();
 
@@ -149,22 +169,31 @@ interface ITrampoline {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Executes a sub-solver's signed route and settles back exactly
-   * `_proposal.buyAmount` of `_buyToken` to the settlement contract
+   * @notice Executes a sub-solver's signed route, sweeps the instance's full
+   * remaining balance of both trade tokens to the settlement contract, and reverts
+   * unless the settlement's buy-token balance grew by at least `_proposal.buyAmount`
    * @dev Callable only by the settlement contract, and only in a settlement submitted
    * by a BYOS submitter: tx.origin must hold the Escrow's SUBMITTER_ROLE, since a live
    * proposal's calldata is public and any allow-listed solver could otherwise replay it
-   * (ADR-0005). The transfer's own insufficient-balance revert is the funding guard
-   * (ADR-0003): a route that falls short reverts the settlement. Surplus beyond
-   * buyAmount stays in the instance.
+   * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): buyAmount is
+   * the floor the sub-solver signed, measured as the growth of the settlement's
+   * buy-token balance between entry and return, so routes that deliver output to the
+   * settlement directly also count. Anything above the floor lands in the settlement
+   * as BYOS-owned slippage (ADR-0008); the instance ends every settlement holding
+   * none of the trade tokens. The tokens are BYOS-supplied call parameters taken from
+   * the order, not signed proposal fields. When `_buyToken` is BUY_ETH_ADDRESS the
+   * snapshot, sweep, and delta are in native ETH. Zero balances are not swept (some
+   * tokens revert on zero-value transfers).
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
-   * @param _buyToken Token to settle back; supplied by BYOS from the order
+   * @param _sellToken The trade's sell token, swept back along with the buy token
+   * @param _buyToken The trade's buy token; BUY_ETH_ADDRESS for native ETH
    * @param _signature Sub-solver's EIP-712 signature over the proposal
    */
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
+    address _sellToken,
     address _buyToken,
     bytes calldata _signature
   ) external;

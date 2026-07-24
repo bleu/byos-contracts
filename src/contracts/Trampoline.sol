@@ -54,13 +54,14 @@ contract Trampoline is ITrampoline {
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
+    address _sellToken,
     address _buyToken,
     bytes calldata _signature
   ) external {
     if (msg.sender != SETTLEMENT) revert Trampoline_OnlySettlement();
     // Settlements are permissionless at the protocol level: once this proposal's
     // signature is public calldata, any allow-listed CoW solver could replay it
-    // (or front-run it) in its own settlement and skim the instance's residue.
+    // (or front-run it) in its own settlement.
     // tx.origin identifies the submitting solver; only BYOS's own EOAs pass.
     if (!IAccessControl(ESCROW).hasRole(IEscrow(ESCROW).SUBMITTER_ROLE(), tx.origin)) {
       revert Trampoline_UnauthorizedSubmitter();
@@ -81,6 +82,8 @@ contract Trampoline is ITrampoline {
     bytes32 _digest = MessageHashUtils.toTypedDataHash(DOMAIN_SEPARATOR, _structHash);
     if (ECDSA.recover(_digest, _signature) != SUB_SOLVER) revert Trampoline_InvalidSignature();
 
+    uint256 _buyBalanceBefore = _settlementBuyTokenBalance(_buyToken);
+
     for (uint256 _i = 0; _i < _interactions.length; ++_i) {
       Interaction calldata _interaction = _interactions[_i];
       (bool _success, bytes memory _returnData) =
@@ -94,11 +97,44 @@ contract Trampoline is ITrampoline {
       }
     }
 
-    if (_buyToken == BUY_ETH_ADDRESS) {
-      (bool _success,) = SETTLEMENT.call{value: _proposal.buyAmount}('');
+    _sweep(_buyToken);
+    _sweep(_sellToken);
+
+    uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
+    if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
+
+    emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
+  }
+
+  /**
+   * @notice Reads the settlement's balance of the trade's buy token
+   * @param _buyToken The buy token; BUY_ETH_ADDRESS reads native ETH
+   * @return _balance The settlement's current balance
+   */
+  function _settlementBuyTokenBalance(
+    address _buyToken
+  ) internal view returns (uint256 _balance) {
+    _balance = _buyToken == BUY_ETH_ADDRESS ? SETTLEMENT.balance : IERC20(_buyToken).balanceOf(SETTLEMENT);
+  }
+
+  /**
+   * @notice Transfers the instance's full balance of `_token` to the settlement
+   * @dev Skips zero balances: some tokens revert on zero-value transfers, and when
+   * the trade's tokens are the same address the second sweep must be a no-op
+   * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
+   */
+  function _sweep(
+    address _token
+  ) internal {
+    if (_token == BUY_ETH_ADDRESS) {
+      uint256 _balance = address(this).balance;
+      if (_balance == 0) return;
+      (bool _success,) = SETTLEMENT.call{value: _balance}('');
       if (!_success) revert Trampoline_EthSettleBackFailed();
     } else {
-      IERC20(_buyToken).safeTransfer(SETTLEMENT, _proposal.buyAmount);
+      uint256 _balance = IERC20(_token).balanceOf(address(this));
+      if (_balance == 0) return;
+      IERC20(_token).safeTransfer(SETTLEMENT, _balance);
     }
   }
 
