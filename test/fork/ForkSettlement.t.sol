@@ -213,7 +213,7 @@ contract ForkSettlementTest is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, buyToken, prop.signature))
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, sellToken, buyToken, prop.signature))
     });
 
     // A solver submits settle() from its own EOA: msg.sender and tx.origin are both it.
@@ -283,7 +283,9 @@ contract ForkSettlementTest is Test {
     interactions[1][0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, address(USDC), prop.signature))
+      callData: abi.encodeCall(
+        ITrampoline.execute, (prop.data, prop.route, address(WETH), address(USDC), prop.signature)
+      )
     });
 
     vm.prank(rival, rival);
