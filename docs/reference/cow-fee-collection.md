@@ -35,19 +35,23 @@ All three fee types above travel the same physical route: a wedge in the execute
 ## One order, end to end (a sell order)
 
 One concrete example threaded through every component. The user sells 1 WETH for USDC with a
-limit price of 2,400. The best route delivers 2,500 USDC. Total fees come to 20 USDC.
+limit price of 2,400. The best route delivers 2,500 USDC. Total fees come to 20 USDC: 1 USDC
+as the solver's gas cut, 19 USDC of protocol and partner fees.
 
 1. The user signs the order — sell 1 WETH, receive at least 2,400 USDC, `feeAmount = 0` — and
    posts it to the orderbook API.
 2. The autopilot puts the order into the next auction, attaching the fee policies (protocol
    surplus/volume fee, any partner fee from appData) and a native ETH price per token, and
    broadcasts the auction to all solvers.
-3. The solver engine finds the route: 1 WETH in, 2,500 USDC out. It reports these raw amounts
-   to its driver. The engine can be completely oblivious to fees.
-4. The driver applies the fee policies by shifting only the clearing prices, so the user's
-   executed amount becomes 2,480 USDC; the route calldata is untouched. The 20 USDC gap covers
-   protocol and partner fees plus the solver's own gas cut, which the driver sizes the same
-   way. It bids with score = user surplus + protocol fees.
+3. The solver engine finds the route: 1 WETH in, 2,500 USDC out. It can ignore protocol and
+   partner fees — the driver handles those next — but the gas cut is the engine's own job; the
+   driver never inserts one. With gas estimated at about 1 USDC worth of ETH, the engine quotes
+   2,499 to its driver while the route still delivers 2,500, keeping the difference. (The
+   solver-driver API also has a legacy `fee` field for taking the cut in sell token instead.)
+   Note the engine thinks in amounts and profitability only; it never builds clearing prices.
+4. The driver applies the fee policies on top, by shifting only the clearing prices: 19 USDC
+   of protocol and partner fees move the user's executed amount from 2,499 down to 2,480. The
+   route calldata is untouched. It bids with score = user surplus + protocol fees.
 5. The autopilot picks the winning bid and the driver submits `settle()`.
 6. `GPv2Settlement` executes: pull 1 WETH from the user via the vault relayer, run the route
    interactions (2,500 USDC arrive in the contract), pay the user 2,480 USDC. The contract
@@ -78,8 +82,8 @@ sequenceDiagram
     U->>AP: sign + post order: sell 1 WETH,<br/>min 2,400 USDC, feeAmount = 0
     AP->>D: auction: order + fee policies + native prices
     D->>E: order
-    E->>D: raw solution: route turns 1 WETH into 2,500 USDC
-    D->>D: apply fee policies: shift clearing prices<br/>so the user receives 2,480 (route untouched)
+    E->>D: solution: route delivers 2,500 USDC,<br/>quote 2,499 (1 USDC kept as gas cut)
+    D->>D: apply fee policies: shift clearing prices<br/>from 2,499 down to 2,480 (route untouched)
     D->>AP: bid, score = surplus + protocol fees
     AP-->>D: auction won
     D->>S: settle()
