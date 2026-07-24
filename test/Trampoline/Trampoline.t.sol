@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
-import {Test} from 'forge-std/Test.sol';
+import {Test, Vm} from 'forge-std/Test.sol';
 
 import {BUY_ETH_ADDRESS, ITrampoline} from 'interfaces/ITrampoline.sol';
 
@@ -334,6 +334,51 @@ contract TrampolineTest is Test {
     assertEq(sellToken.balanceOf(settlement), SELL_AMOUNT - consumed);
     assertEq(buyToken.balanceOf(address(trampoline)), 0);
     assertEq(sellToken.balanceOf(address(trampoline)), 0);
+  }
+
+  function test_execute_same_token_hook_order_sweeps_once_and_enforces_floor() public {
+    // Same-token hook order (COW-1194): sellToken == buyToken, sellAmount > buyAmount,
+    // and the route spends part of the input on the hook. The sweep returning the
+    // unconsumed input is the delivery the delta check measures; the floor bounds
+    // route consumption at sellAmount - buyAmount.
+    uint256 hookBudget = SELL_AMOUNT - BUY_AMOUNT;
+    address hook = makeAddr('hook');
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    route[0] = ITrampoline.Interaction({
+      target: address(sellToken), value: 0, callData: abi.encodeCall(IERC20.transfer, (hook, hookBudget))
+    });
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.recordLogs();
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(sellToken), signature);
+
+    assertEq(sellToken.balanceOf(settlement), SELL_AMOUNT - hookBudget);
+    assertEq(sellToken.balanceOf(address(trampoline)), 0);
+
+    // The shared token sweeps exactly once: no zero-value second leg, no double send.
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    uint256 sweeps;
+    for (uint256 i = 0; i < logs.length; ++i) {
+      if (
+        logs[i].emitter == address(sellToken) && logs[i].topics[0] == keccak256('Transfer(address,address,uint256)')
+          && logs[i].topics[1] == bytes32(uint256(uint160(address(trampoline))))
+          && logs[i].topics[2] == bytes32(uint256(uint160(settlement)))
+      ) sweeps++;
+    }
+    assertEq(sweeps, 1);
+
+    // One token over the budget and the returned balance no longer covers the floor.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    route[0].callData = abi.encodeCall(IERC20.transfer, (hook, hookBudget + 1));
+    signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, BUY_AMOUNT - 1, BUY_AMOUNT));
+    trampoline.execute(proposal, route, address(sellToken), address(sellToken), signature);
   }
 
   function test_execute_passes_when_route_delivers_directly_to_settlement() public {

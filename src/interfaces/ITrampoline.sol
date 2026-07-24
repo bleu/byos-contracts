@@ -183,7 +183,8 @@ interface ITrampoline {
    * none of the trade tokens. The tokens are BYOS-supplied call parameters taken from
    * the order, not signed proposal fields. When `_buyToken` is BUY_ETH_ADDRESS the
    * snapshot, sweep, and delta are in native ETH. Zero balances are not swept (some
-   * tokens revert on zero-value transfers).
+   * tokens revert on zero-value transfers), and when the trade's tokens are the same
+   * address (same-token hook orders) the shared token is swept once.
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
    * @param _sellToken The trade's sell token, swept back along with the buy token
