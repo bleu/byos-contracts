@@ -116,10 +116,37 @@ runs between the two readings, so the delta is attributable to the route:
 - it reverts when the route fell short of the signed floor, so the settlement reverts
   and no trade happens.
 
+No matching assertion is needed on the sell side. BYOS itself authors the interaction
+that pushes exactly `sellAmount` into the instance, and the route runs as the
+instance — a fund-less context that holds only that push and has no way to spend
+`GPv2Settlement`'s balance ([ADR-0001](0001-trampoline-topology.md)). The sweep
+returns whatever the route left unconsumed, so the settlement's net sell-token outflow
+is at most `sellAmount` by construction; an on-chain sell-token delta check would
+re-verify a bound the flow already enforces.
+
 The floor is the bid. The sub-solver signs the minimum it is sure to deliver, below its
 simulated route output; margin sizing is its own tradeoff — too thin reverts and lands
 Track A debits, too thick loses auctions. Whether the proposal API suggests floors or
 filters thin ones is service policy, out of scope here.
+
+### Both order kinds, one mechanism
+
+Nothing above is specific to sell orders. For either kind the instance receives the
+signed `sellAmount`, runs the route, sweeps both trade tokens, and `execute` asserts
+the same buy-token delta floor. What changes is which amount the user fixed, and so
+where the slack shows up:
+
+| | Sell order | Buy order |
+|---|---|---|
+| User fixes | `sellAmount`; the route normally consumes all of it | `buyAmount`, the exact amount owed to the user |
+| Floor means | the minimum output the sub-solver commits to deliver | at least the user's exact `buyAmount` |
+| Typical leftover | buy-token over-delivery above the floor | unconsumed sell token, returned by the sweep |
+
+Either leftover lands in `GPv2Settlement` as BYOS-owned slippage
+([ADR-0008](0008-residue-disposition.md)). The user-facing fee wedge also flips sides —
+buy token for sell orders, sell token for buy orders — but that is the driver's price
+shift, downstream of and invisible to the trampoline; worked examples for both kinds
+are in [docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md).
 
 ### Infra-failure attribution
 
