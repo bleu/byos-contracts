@@ -175,7 +175,8 @@ contract ForkSettlementTest is Test {
 
   /// @dev Builds a one-trade settlement carrying the ADR-0003 value flow (push
   /// sellAmount to the trampoline, call execute) and submits it as the solver.
-  /// The user's limit is set 1% under the quote so the clearing price satisfies it.
+  /// `buyAmount` is the clearing amount the user is paid; the user's limit is set
+  /// 1% under it so the clearing price satisfies it.
   function _settleOrder(
     address sellToken,
     address buyToken,
@@ -213,7 +214,7 @@ contract ForkSettlementTest is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, buyToken, prop.signature))
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, sellToken, buyToken, prop.signature))
     });
 
     // A solver submits settle() from its own EOA: msg.sender and tx.origin are both it.
@@ -233,21 +234,24 @@ contract ForkSettlementTest is Test {
     WETH.approve(SETTLEMENT.vaultRelayer(), sellAmount);
     vm.stopPrank();
 
-    // Quote the route output; V2 math is deterministic within the block, so the
-    // trampoline receives exactly this and settles it all back (zero surplus).
+    // The route delivers the full V2 quote; the signed floor and the clearing amount
+    // sit below it, so the sweep hands the settlement more than it pays the user.
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
+    uint256 clearingOut = quotedOut * 99 / 100;
     SignedProposal memory prop =
-      _signProposal(sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut, false));
+      _signProposal(sellAmount, clearingOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut, false));
 
     uint256 settlementWethBefore = WETH.balanceOf(address(SETTLEMENT));
     uint256 settlementUsdcBefore = USDC.balanceOf(address(SETTLEMENT));
 
-    _settleOrder(address(WETH), address(USDC), sellAmount, quotedOut, prop);
+    _settleOrder(address(WETH), address(USDC), sellAmount, clearingOut, prop);
 
-    // User was paid exactly at clearing price; BYOS buffers are untouched.
-    assertEq(USDC.balanceOf(user), quotedOut);
+    // User was paid exactly at clearing price; the over-delivery is not an exact
+    // settle-back and does not strand in the instance — it lands in the settlement
+    // as BYOS-owned slippage (ADR-0008), and the instance ends empty of both tokens.
+    assertEq(USDC.balanceOf(user), clearingOut);
     assertEq(WETH.balanceOf(address(SETTLEMENT)), settlementWethBefore);
-    assertEq(USDC.balanceOf(address(SETTLEMENT)), settlementUsdcBefore);
+    assertEq(USDC.balanceOf(address(SETTLEMENT)), settlementUsdcBefore + (quotedOut - clearingOut));
     assertEq(WETH.balanceOf(address(trampoline)), 0);
     assertEq(USDC.balanceOf(address(trampoline)), 0);
   }
@@ -255,9 +259,10 @@ contract ForkSettlementTest is Test {
   function test_fork_replayed_proposal_by_second_solver_reverts() public onlyFork {
     // COW-1151: after BYOS settles, the proposal's signature and route are public
     // calldata. A rival allow-listed solver carries the same execute in its own
-    // (tradeless) settlement to skim the instance's residue. The submitter gate
-    // must reject it: the rival passes the protocol's solver allowlist but holds
-    // no SUBMITTER_ROLE on the BYOS escrow.
+    // (tradeless) settlement — the sweep leaves no residue to skim, but a replayed
+    // route could still grief the instance or front-run a live proposal. The
+    // submitter gate must reject it: the rival passes the protocol's solver
+    // allowlist but holds no SUBMITTER_ROLE on the BYOS escrow.
     uint256 sellAmount = 1 ether;
 
     vm.deal(user, 2 ether);
@@ -283,7 +288,9 @@ contract ForkSettlementTest is Test {
     interactions[1][0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, address(USDC), prop.signature))
+      callData: abi.encodeCall(
+        ITrampoline.execute, (prop.data, prop.route, address(WETH), address(USDC), prop.signature)
+      )
     });
 
     vm.prank(rival, rival);
@@ -300,17 +307,20 @@ contract ForkSettlementTest is Test {
     USDC.approve(vaultRelayer, sellAmount);
 
     uint256 quotedOut = _quote(address(USDC), address(WETH), sellAmount);
-    // Swap USDC -> WETH, then unwrap: the trampoline delivers native ETH.
+    uint256 clearingOut = quotedOut * 99 / 100;
+    // Swap USDC -> WETH, then unwrap: the trampoline sweeps native ETH. The floor
+    // and clearing amount sit below the quote, so the sweep over-delivers.
     SignedProposal memory prop =
-      _signProposal(sellAmount, quotedOut, _swapRoute(address(USDC), address(WETH), sellAmount, quotedOut, true));
+      _signProposal(sellAmount, clearingOut, _swapRoute(address(USDC), address(WETH), sellAmount, quotedOut, true));
 
     uint256 userEthBefore = user.balance;
     uint256 settlementEthBefore = address(SETTLEMENT).balance;
 
-    _settleOrder(address(USDC), BUY_ETH, sellAmount, quotedOut, prop);
+    _settleOrder(address(USDC), BUY_ETH, sellAmount, clearingOut, prop);
 
-    assertEq(user.balance - userEthBefore, quotedOut);
-    assertEq(address(SETTLEMENT).balance, settlementEthBefore);
+    // The ETH surplus stays in the settlement; the instance ends empty.
+    assertEq(user.balance - userEthBefore, clearingOut);
+    assertEq(address(SETTLEMENT).balance, settlementEthBefore + (quotedOut - clearingOut));
     assertEq(address(trampoline).balance, 0);
     assertEq(USDC.balanceOf(address(trampoline)), 0);
   }

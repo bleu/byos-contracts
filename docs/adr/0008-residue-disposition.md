@@ -1,156 +1,97 @@
-# Residue disposition: sub-solver-reclaimable
+# Residue disposition: swept to the settlement
 
-Status: accepted
+Status: accepted; decision inverted 2026-07-22
+
+> Previously residue was sub-solver property, reclaimable via `claimToken`/`claimTokens`
+> on the instance; inverted after the CoW fee-mechanics review showed that surplus
+> parked in the settlement contract returns to the solver through CoW's weekly
+> accounting ([docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md)).
 
 ## Context
 
-[ADR-0003](0003-trampoline-deployment-settlement-integration.md) fixed the settlement
-value flow: `execute` settles back exactly `buyAmount` and whatever the route produced
-beyond it stays in the sub-solver's Trampoline instance. It deliberately left the
-disposition of that **residue** open. This ADR settles it.
+[ADR-0003](0003-trampoline-deployment-settlement-integration.md) fixes the settlement
+value flow. Its original form settled back exactly `buyAmount` and left whatever the
+route produced beyond it in the sub-solver's Trampoline instance — **residue**: route
+surplus beyond the quote, unconsumed `sellToken` (buy orders over-provision their
+input), intermediate-token dust, stray native ETH. The first version of this ADR made
+that residue sub-solver property behind claim functions, on three grounds: sweeping it
+to the settlement would confiscate the sub-solver's alpha and push its capture in-route
+via approval helpers (the pattern ADR-0001's filter rejects); a live replay exposure
+(COW-1151) made parked residue unsafe anyway; and a BYOS key over the instance would
+break the no-privileged-key posture that ADR-0005's trust argument rests on.
 
-Residue is any balance left in an instance after a settlement: route surplus beyond
-`buyAmount`, unconsumed `sellToken`, intermediate-token dust, stray native ETH. There is
-no negative counterpart to dispose of — a route that falls short reverts the whole
-settlement via the exact-amount transfer guard (ADR-0003), so only positive surplus can
-strand.
+Three findings changed those premises (CoW solvers-team meeting and fee-mechanics
+review, 2026-07-22):
 
-Two earlier positions are in tension. [ADR-0001](0001-trampoline-topology.md) stated a
-sweep post-condition ("the instance ends holding zero of the trade tokens; sweep any
-remainder back to `GPv2Settlement`"), treating residue as BYOS's positive slippage. The
-implementation that landed in PR #4 instead transfers exactly `buyAmount` and leaves the
-rest, per ADR-0003. One of the two had to give.
-
-The PR #4 review also surfaced a replay exposure (COW-1151): once a settlement lands,
-the proposal signature and route are public calldata, and while `validUntil` has not
-passed any other allow-listed CoW solver can carry a replayed `execute` in their own
-settlement. A replayed route that produces less than `buyAmount` pays the difference out
-of the instance's residue, credited to the replayer through CoW's slippage accounting.
-Whatever the disposition, residue is not safely parked in the meantime.
-
-Directions weighed (from the issue): BYOS-collected (swept and coupled into
-collateral/reward accounting), sub-solver-reclaimable (a claim mechanism; residue is a
-reward outside the collateral model), or counted into how the BYOS service scores
-proposals.
+- Fees and slippage are price wedges: whatever `GPv2Settlement` pulls in and does not
+  pay out is credited to the solver — after protocol and partner fees — and returned
+  weekly in native token. Surplus parked in the settlement is not lost to BYOS; it is
+  the normal way solvers collect.
+- The sub-solver persona is a DEX or routing API compensated by its own venue fees
+  inside the route, not by leftovers. The floor is the bid: everything above it was
+  never promised to anyone, and in-route capture of it is bid-neutral — it takes only
+  what the sub-solver could have kept by signing a higher floor.
+- The replay exposure was closed by the submitter gate (#11), so nothing about parked
+  balances is urgent anymore.
 
 ## Decision
 
-Residue is the sub-solver's property, reclaimable through the claim functions on their
-instance. It sits entirely outside the collateral model: BYOS has no key over it — no
-sweep, no freeze, no debit.
+There is no residue. `execute` sweeps the instance's full remaining balance of both
+trade tokens to `GPv2Settlement` and enforces `buyAmount` as a floor via the
+balance-delta check ([ADR-0003](0003-trampoline-deployment-settlement-integration.md)):
+the instance ends every settlement holding none of the trade tokens. Over-delivery and
+unconsumed sell tokens are BYOS-owned settlement slippage, returned weekly by CoW's
+accounting. The claim functions are removed; the trampoline keeps zero privileged
+keys — with nothing resting in the instance, nobody needs one.
 
-### Why the sub-solver owns it
+### Strays are written off
 
-Surplus is route output beyond what the sub-solver promised. If BYOS swept it to
-`GPv2Settlement` (where CoW's slippage accounting would credit it to BYOS), rational
-sub-solvers would capture it in-route instead. The surplus amount is unknown at signing
-time, so in-route capture means an approval to a sweep-helper contract — precisely the
-sub-solver-authored-approval pattern ADR-0001's preventive filter tries to reject.
-Confiscation wouldn't collect the value; it would push its capture into the shape we
-least want to see in routes. A claim function makes the sanctioned path the easy path.
+Tokens that land on an instance outside the settlement flow — mistaken transfers,
+airdrops, intermediate-token dust — are nobody's problem by design. A sub-solver with a
+standing route-planted approval can take them; preventing that is the un-enumerable
+approval-fighting ADR-0001 rejected, and the amounts at stake are donations and dust —
+never user funds, trade capital, buffers, or escrow, all of which are protected by
+settlement atomicity and the floor check. If a sub-solver skims strays, the response is
+off-chain (gatekeeping, eviction), not a contract mechanism.
 
-Ownership also makes ADR-0001's containment argument cleaner rather than weaker. The
-planted-approval story was "an approval over an empty contract drains nothing"; with
-residue as sub-solver property it becomes "a standing approval reaches only the
-sub-solver's own money". Per-instance isolation already guarantees no other party's
-value is reachable, so the worst case of a planted approval plus resting residue is the
-owner taking their own reward through a side door.
+### In-route capture is tolerated
 
-Finally, this keeps the merged hot path untouched: `execute`'s exact-amount transfer
-remains the funding guard, with no per-settlement sweep gas.
+A sub-solver can keep surplus by capturing it in-route before the sweep. Accepted: it
+is bid-neutral, touches only value above its own signed floor, and guarding against it
+would reopen the filtered-approval arms race. Uncaptured padding is a donation to BYOS.
 
-### The claim functions
+### What survives
 
-```solidity
-function claimToken(address token, address recipient) external;
-function claimTokens(address[] calldata tokens, address recipient) external;
-```
-
-`claimTokens` is the batch form of `claimToken`; both share the same per-token logic.
-
-- Callable only by `SUB_SOLVER`. Gating makes the free `recipient` parameter safe, and
-  the recipient matters: the sub-solver key is already load-bearing three ways (proposal
-  signer, escrow key, CREATE2 salt) and necessarily lives hot in their infrastructure.
-  Forcing residue to pile up at that same hot address would be strictly worse than
-  letting them direct it to a treasury.
-- Transfers the full balance of each listed token to `recipient`. Partial amounts buy
-  nothing. The trampoline stays storage-free, so it cannot know what it holds; the
-  caller enumerates tokens off-chain and passes them in.
-- Native ETH is claimed with the existing `BUY_ETH_ADDRESS` sentinel in the token array,
-  matching `execute`'s settle-back convention.
-- Emits a `ResidueClaimed` event per token for off-chain accounting.
-
-One behavior is documented rather than guarded: if `SUB_SOLVER` is a contract, a route
-interaction could call back into it and reenter a claim mid-settlement, pulling trade
-capital out from under the route. The exact-amount settle-back transfer then reverts,
-which reverts the entire settlement — the sub-solver gains nothing and eats their own
-Track A debit. Self-harm needs no guard; the transfer-as-guard posture of ADR-0003
-already covers it.
-
-### Replay exposure: accepted and documented
-
-Residue is at risk to allow-listed-solver replay for as long as any proposal signed for
-the instance is unexpired. This ADR accepts that exposure without a dependency on
-COW-1151 (restricting `execute` to BYOS-submitted settlements): the at-risk value
-belongs to the party that controls both exposure knobs — the sub-solver chooses
-`validUntil` when signing and chooses when to claim. The operational doctrine is that
-**the instance is not a wallet**: claim promptly, keep `validUntil` short. COW-1151
-remains open as independent hardening, not a precondition.
-
-### Outside the collateral model
-
-Residue is not reachable for Track B recovery. A debit or freeze on the trampoline was
-considered and left out of scope: it would put a BYOS key over sub-solver assets on a
-contract whose no-privileged-key posture is load-bearing — ADR-0005's signature-gating
-argument is exactly that BYOS cannot touch sub-solver assets or fabricate outcomes — and
-it would be unenforceable anyway, since a live sub-solver claims within a block while a
-Track B certificate takes days to months. Collateral adequacy stays the Escrow's job
-alone; the risk table in [CONTEXT.md](../../CONTEXT.md) is unchanged.
-
-### What this supersedes
-
-ADR-0001's allowance-hygiene post-condition (steps 3–4: instance ends holding zero of
-the trade tokens, sweep any remainder back to `GPv2Settlement` or revert) is superseded.
-The enforced invariant was always the narrower one and is now stated plainly: **the
-instance holds no protocol balance at rest** — user funds are protected by settlement
-atomicity upstream of any residue, and buffers never transit the instance. "Empty at
-rest" becomes an operational expectation the sub-solver has every incentive to maintain,
-not a contract invariant.
+Per-instance isolation, the storage-free instance, and signature-gated execution are
+unchanged. ADR-0001's containment story reverts to its original, stronger form: the
+instance is genuinely empty at rest, so a planted approval drains nothing — "the
+instance is not a wallet" is now literal.
 
 ## Alternatives considered
 
-- **BYOS-collected via in-settlement sweep** (ADR-0001's original post-condition):
-  assert `balance >= buyAmount`, transfer the full balance, and let CoW's slippage
-  accounting credit it to BYOS. Restores zero-at-rest and leaves nothing for a replay to
-  skim, in roughly the same gas. Rejected on incentives: it confiscates the sub-solver's
-  alpha, pushing them either to in-route capture helpers (the approval pattern we
-  filter) or to quoting with thinner margins that revert more often and land Track A
-  debits. It also reopens the merged hot path for an economics question.
-- **Reclaimable plus BYOS debit** (residue as collateral of last resort, "unclaimed
-  residue is at-risk; claiming makes it yours"): internally coherent, but it trades the
-  trampoline's no-key posture for recovery that only ever catches abandoned dust, and it
-  dilutes the property-rights rationale this decision rests on. Out of scope; may be
-  revisited if abandoned residue turns out to be material.
-- **Counted into solution scoring**: not actually an alternative — it is an off-chain
-  service concern that composes with any physical disposition. The BYOS service is free
-  to score proposals on expected slippage; nothing on-chain hangs on it.
-- **Permissionless claim with fixed recipient** (anyone may trigger, funds always to
-  `SUB_SOLVER`): no theft surface, but it forces residue onto the hot signer address and
-  bricks ETH claims for contract sub-solvers that cannot receive. Rejected.
-- **Relayable EIP-712-signed claim**: consistent with the proposal pattern but adds
-  replay-salt and expiry machinery for what is usually dust. Rejected.
+- **Sub-solver-reclaimable residue via claim functions** (this ADR's original
+  decision). Coherent while its premises held; the context above lists how each fell.
+  Removing the claims also deletes an entry point and an event from the
+  security-critical contract.
+- **Permissionless `sweep(token)` for strays, recipient hardcoded to the settlement.**
+  No key and no theft surface, and BYOS would win most stray races. Dropped: strays
+  are declared out of scope, and the function would exist only to chase donations and
+  dust.
+- **Operator-gated claim with a free recipient.** Breaks the "operator can grief but
+  not steal" invariant ([CONTEXT.md](../../CONTEXT.md)). Rejected.
+- **BYOS debit or freeze over the instance.** Still rejected for the original reason —
+  a key over sub-solver execution infrastructure — and now also pointless, since
+  nothing rests there.
 
 ## Consequences
 
-- The Trampoline gains `claimToken`/`claimTokens`, a `ResidueClaimed` event, and an
-  only-sub-solver error.
-  It stays storage-free and keeps zero privileged keys.
-- ADR-0001's sweep post-condition is superseded (pointer note added there); ADR-0003's
-  open question closes.
-- Sub-solvers carry an operational duty: enumerate their residue off-chain and claim
-  promptly, because unclaimed residue is exposed to replay skim until COW-1151 lands and
-  to nothing else.
-- Residue never counts toward collateral. The BYOS service must not assume instance
-  balances are recoverable when sizing sub-solver exposure.
-- Exotic tokens (fee-on-transfer, rebasing) are the claimer's own concern; a claim
-  transfers whatever the token contract does with a full-balance transfer.
+- The Trampoline loses `claimToken`/`claimTokens`, the `ResidueClaimed` event, and the
+  only-sub-solver error; `execute` gains the sweep and the delta check (implementation
+  follows ADR-0003). One external entry point remains.
+- Sub-solvers hold no on-chain property in the instance and need no claim workflow;
+  their compensation is in-route (venue fees) plus whatever they capture above their
+  own floor.
+- BYOS's weekly settlement-slippage line includes sub-solver over-delivery; any
+  per-sub-solver rebate would be an off-chain service choice, not a contract concern.
+- ADR-0001's zero-at-rest post-condition is restored as the enforced invariant for
+  trade tokens.

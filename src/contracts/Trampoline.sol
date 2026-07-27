@@ -54,13 +54,14 @@ contract Trampoline is ITrampoline {
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
+    address _sellToken,
     address _buyToken,
     bytes calldata _signature
   ) external {
     if (msg.sender != SETTLEMENT) revert Trampoline_OnlySettlement();
     // Settlements are permissionless at the protocol level: once this proposal's
     // signature is public calldata, any allow-listed CoW solver could replay it
-    // (or front-run it) in its own settlement and skim the instance's residue.
+    // (or front-run it) in its own settlement.
     // tx.origin identifies the submitting solver; only BYOS's own EOAs pass.
     if (!IAccessControl(ESCROW).hasRole(IEscrow(ESCROW).SUBMITTER_ROLE(), tx.origin)) {
       revert Trampoline_UnauthorizedSubmitter();
@@ -81,6 +82,8 @@ contract Trampoline is ITrampoline {
     bytes32 _digest = MessageHashUtils.toTypedDataHash(DOMAIN_SEPARATOR, _structHash);
     if (ECDSA.recover(_digest, _signature) != SUB_SOLVER) revert Trampoline_InvalidSignature();
 
+    uint256 _buyBalanceBefore = _settlementBuyTokenBalance(_buyToken);
+
     for (uint256 _i = 0; _i < _interactions.length; ++_i) {
       Interaction calldata _interaction = _interactions[_i];
       (bool _success, bytes memory _returnData) =
@@ -94,54 +97,45 @@ contract Trampoline is ITrampoline {
       }
     }
 
-    if (_buyToken == BUY_ETH_ADDRESS) {
-      (bool _success,) = SETTLEMENT.call{value: _proposal.buyAmount}('');
-      if (!_success) revert Trampoline_EthSettleBackFailed();
-    } else {
-      IERC20(_buyToken).safeTransfer(SETTLEMENT, _proposal.buyAmount);
-    }
-  }
+    _sweep(_buyToken);
+    // Same-token hook orders (sellToken == buyToken) sweep once: the returned
+    // unconsumed input is the delivery the delta check measures.
+    if (_sellToken != _buyToken) _sweep(_sellToken);
 
-  /// @inheritdoc ITrampoline
-  function claimToken(
-    address _token,
-    address _recipient
-  ) external {
-    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+    uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
+    if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
 
-    _claimToken(_token, _recipient);
-  }
-
-  /// @inheritdoc ITrampoline
-  function claimTokens(
-    address[] calldata _tokens,
-    address _recipient
-  ) external {
-    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
-
-    for (uint256 _i = 0; _i < _tokens.length; ++_i) {
-      _claimToken(_tokens[_i], _recipient);
-    }
+    emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
   }
 
   /**
-   * @notice Transfers the instance's full balance of `_token` to `_recipient`
-   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
-   * @param _recipient The address receiving the claimed balance
+   * @notice Reads the settlement's balance of the trade's buy token
+   * @param _buyToken The buy token; BUY_ETH_ADDRESS reads native ETH
+   * @return _balance The settlement's current balance
    */
-  function _claimToken(
-    address _token,
-    address _recipient
+  function _settlementBuyTokenBalance(
+    address _buyToken
+  ) internal view returns (uint256 _balance) {
+    _balance = _buyToken == BUY_ETH_ADDRESS ? SETTLEMENT.balance : IERC20(_buyToken).balanceOf(SETTLEMENT);
+  }
+
+  /**
+   * @notice Transfers the instance's full balance of `_token` to the settlement
+   * @dev Skips zero balances: some tokens revert on zero-value transfers
+   * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
+   */
+  function _sweep(
+    address _token
   ) internal {
-    uint256 _amount;
     if (_token == BUY_ETH_ADDRESS) {
-      _amount = address(this).balance;
-      (bool _success,) = _recipient.call{value: _amount}('');
-      if (!_success) revert Trampoline_EthClaimFailed();
+      uint256 _balance = address(this).balance;
+      if (_balance == 0) return;
+      (bool _success,) = SETTLEMENT.call{value: _balance}('');
+      if (!_success) revert Trampoline_EthSettleBackFailed();
     } else {
-      _amount = IERC20(_token).balanceOf(address(this));
-      IERC20(_token).safeTransfer(_recipient, _amount);
+      uint256 _balance = IERC20(_token).balanceOf(address(this));
+      if (_balance == 0) return;
+      IERC20(_token).safeTransfer(SETTLEMENT, _balance);
     }
-    emit ResidueClaimed(_token, _amount, _recipient);
   }
 }

@@ -34,7 +34,9 @@ are out of scope for this repo.
 
 This means:
 
-- ADR-0005's schema and `execute` path stand as-is — no new typehash, no domain bump.
+- ADR-0005's schema stands as-is — no new typehash, no domain bump. (`execute`'s
+  internals are revised separately by ADR-0003's floor, sweep, and delta check;
+  that is orthogonal to the single-order decision.)
 - ADR-0003's multi-order sketch ("repeat transfer-in + `execute` per trade") is
   retired.
 - ADR-0004's static minimum escrow balance stays correctly sized: worst-case exposure

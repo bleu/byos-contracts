@@ -46,7 +46,7 @@ cannot carry that boundary, because CoW itself does not filter and "grant an all
 has shapes a filter misses. For example, `Permit2.approve` uses a different target and
 selector yet still grants a drainable allowance on a real token. What a sub-solver
 cannot get around is a contract that holds no funds and where each sub-solver reaches
-only its own residue.
+only its own instance.
 
 ### What topology actually governs
 
@@ -55,9 +55,10 @@ approvals to sub-solver-chosen targets and may retain dust. Approvals and dust a
 persistent contract state. An exploit needs both a planted approval and a resting
 balance; an approval over an empty contract drains nothing.
 
-The only value that can ever rest in the Trampoline is BYOS's own positive slippage.
+The only value that can ever rest in the Trampoline is a stray token or dust — trade
+tokens are swept back every settlement ([ADR-0008](0008-residue-disposition.md)).
 Users are paid by `GPv2Settlement` at clearing price and the settlement reverts on
-shortfall, so atomicity protects them upstream of any residue. Other sub-solvers'
+shortfall, so atomicity protects them upstream of any leftovers. Other sub-solvers'
 collateral lives in escrow and never transits the Trampoline. So the worst case of a
 leftover plus a planted approval is BYOS leaking its own surplus, which is an accounting
 concern rather than theft of user or counterparty funds.
@@ -74,10 +75,11 @@ escrow-deposit time, paid by the sub-solver) is settled in
 
 ### Allowance hygiene and desired execution
 
-> Since acceptance, the sweep post-condition below (steps 3–4) was superseded by
-> [ADR-0008](0008-residue-disposition.md): `execute` settles back exactly `buyAmount`
-> and any remainder is residue, reclaimable by the sub-solver. The enforced invariant is
-> no *protocol* balance at rest, not zero balance.
+> The sweep post-condition below was briefly superseded by sub-solver-reclaimable
+> residue and restored on 2026-07-22 in floor-plus-delta-check form: `execute` sweeps
+> both trade tokens to `GPv2Settlement` and asserts the settlement's buy-token delta
+> covers `buyAmount`; stray tokens are written off
+> ([ADR-0008](0008-residue-disposition.md)).
 
 The leak-prevention control is the sweep, and it is required regardless of topology:
 
@@ -167,9 +169,11 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
   downside of per-instance, "more deploys and bookkeeping", is largely neutralized by
   deterministic addressing.
 - The isolation claim this ADR rests on — a route reaches only its own instance's
-  residue, never settlement buffers, user funds, escrow collateral, or another instance —
+  balance, never settlement buffers, user funds, escrow collateral, or another instance —
   is proven adversarially against the real `GPv2Settlement` in
-  [docs/security/trampoline-settlement-isolation.md](../security/trampoline-settlement-isolation.md).
+  [docs/security/trampoline-settlement-isolation.md](../security/trampoline-settlement-isolation.md)
+  (written against the pre-2026-07-22 residue model; the isolation boundary it proves
+  is unchanged by the sweep).
 
 ### Flagged downstream decisions (coupled, not settled here)
 
