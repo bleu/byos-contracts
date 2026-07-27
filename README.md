@@ -64,4 +64,4 @@ defaults.
 
 ## License
 
-LGPL-3.0-or-later
+GPL-3.0-or-later

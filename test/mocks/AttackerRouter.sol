@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
 /// @notice A route target that attempts an arbitrary call and swallows any revert, so
