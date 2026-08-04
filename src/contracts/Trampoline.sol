@@ -7,8 +7,10 @@ import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ECDSA} from '@openzeppelin/contracts/utils/cryptography/ECDSA.sol';
 import {MessageHashUtils} from '@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol';
 
-import {IEscrow} from 'interfaces/IEscrow.sol';
 import {BUY_ETH_ADDRESS, ITrampoline, PROPOSAL_TYPEHASH} from 'interfaces/ITrampoline.sol';
+
+/// @dev Inlined from Escrow.SUBMITTER_ROLE to avoid an external call on every execute
+bytes32 constant SUBMITTER_ROLE = keccak256('SUBMITTER_ROLE');
 
 contract Trampoline is ITrampoline {
   using SafeERC20 for IERC20;
@@ -63,7 +65,7 @@ contract Trampoline is ITrampoline {
     // signature is public calldata, any allow-listed CoW solver could replay it
     // (or front-run it) in its own settlement.
     // tx.origin identifies the submitting solver; only BYOS's own EOAs pass.
-    if (!IAccessControl(ESCROW).hasRole(IEscrow(ESCROW).SUBMITTER_ROLE(), tx.origin)) {
+    if (!IAccessControl(ESCROW).hasRole(SUBMITTER_ROLE, tx.origin)) {
       revert Trampoline_UnauthorizedSubmitter();
     }
     if (block.timestamp > _proposal.validUntil) revert Trampoline_ProposalExpired();
