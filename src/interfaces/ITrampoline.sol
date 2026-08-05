@@ -85,6 +85,11 @@ interface ITrampoline {
   error Trampoline_OnlySettlement();
 
   /**
+   * @notice Throws if sweep was called by someone other than the sub-solver
+   */
+  error Trampoline_OnlySubSolver();
+
+  /**
    * @notice Throws if the settlement was not submitted by an authorized BYOS submitter
    * (tx.origin lacks the Escrow's SUBMITTER_ROLE)
    */
@@ -179,5 +184,16 @@ interface ITrampoline {
     address _sellToken,
     address _buyToken,
     bytes calldata _signature
+  ) external;
+
+  /**
+   * @notice Sweeps the instance's full balance of `_token` to the settlement contract.
+   * Callable only by the sub-solver. Useful for reclaiming tokens stuck in the
+   * instance outside of an execute call (e.g. airdrops, accidental transfers).
+   * Skips zero balances: some tokens revert on zero-value transfers.
+   * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
+   */
+  function sweep(
+    address _token
   ) external;
 }

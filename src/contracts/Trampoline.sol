@@ -102,28 +102,33 @@ contract Trampoline is ITrampoline {
     // unconsumed input is the delivery the delta check measures.
     if (_sellToken != _buyToken) _sweep(_sellToken);
 
-    uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
+    uint256 _balanceAfter = _settlementBuyTokenBalance(_buyToken);
+    // Guard against underflow: if the balance decreased (route consumed settlement
+    // buffers), delta is zero and the floor check emits the meaningful revert
+    // instead of a generic Panic(0x11).
+    uint256 _delta = _balanceAfter > _buyBalanceBefore ? _balanceAfter - _buyBalanceBefore : 0;
     if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
 
     emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
   }
 
-  /**
-   * @notice Reads the settlement's balance of the trade's buy token
-   * @param _buyToken The buy token; BUY_ETH_ADDRESS reads native ETH
-   * @return _balance The settlement's current balance
-   */
+  /// @inheritdoc ITrampoline
+  function sweep(
+    address _token
+  ) external {
+    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+    _sweep(_token);
+  }
+
+  /// @dev Reads the settlement's balance of `_buyToken`; native ETH when BUY_ETH_ADDRESS
   function _settlementBuyTokenBalance(
     address _buyToken
   ) internal view returns (uint256 _balance) {
     _balance = _buyToken == BUY_ETH_ADDRESS ? SETTLEMENT.balance : IERC20(_buyToken).balanceOf(SETTLEMENT);
   }
 
-  /**
-   * @notice Transfers the instance's full balance of `_token` to the settlement
-   * @dev Skips zero balances: some tokens revert on zero-value transfers
-   * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
-   */
+  /// @dev Sweeps the instance's full balance of `_token` to the settlement.
+  /// Skips zero balances: some tokens revert on zero-value transfers.
   function _sweep(
     address _token
   ) internal {
