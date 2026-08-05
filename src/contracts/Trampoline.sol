@@ -108,14 +108,6 @@ contract Trampoline is ITrampoline {
     emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
   }
 
-  /// @inheritdoc ITrampoline
-  function sweep(
-    address _token
-  ) external {
-    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
-    _sweep(_token);
-  }
-
   /// @dev Reads the settlement's balance of `_buyToken`; native ETH when BUY_ETH_ADDRESS
   function _settlementBuyTokenBalance(
     address _buyToken
