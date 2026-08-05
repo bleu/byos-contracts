@@ -101,13 +101,8 @@ contract Trampoline is ITrampoline {
     emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
   }
 
-  /**
-   * @notice Verifies the sub-solver's EIP-712 signature over the proposal and
-   * interactions using inline assembly for hashing and raw ecrecover
-   * @param _proposal The signed proposal fields
-   * @param _interactions The route interactions, hashed into the signature
-   * @param _signature The 65-byte EIP-712 signature (r || s || v)
-   */
+  /// @dev Verifies the sub-solver's EIP-712 signature over the proposal and
+  /// interactions using inline assembly for hashing and raw ecrecover
   function _verifySignature(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
@@ -161,22 +156,15 @@ contract Trampoline is ITrampoline {
     if (_recovered != SUB_SOLVER) revert Trampoline_InvalidSignature();
   }
 
-  /**
-   * @notice Reads the settlement's balance of the trade's buy token
-   * @param _buyToken The buy token; BUY_ETH_ADDRESS reads native ETH
-   * @return _balance The settlement's current balance
-   */
+  /// @dev Reads the settlement's balance of `_buyToken`; native ETH when BUY_ETH_ADDRESS
   function _settlementBuyTokenBalance(
     address _buyToken
   ) internal view returns (uint256 _balance) {
     _balance = _buyToken == BUY_ETH_ADDRESS ? SETTLEMENT.balance : IERC20(_buyToken).balanceOf(SETTLEMENT);
   }
 
-  /**
-   * @notice Transfers the instance's full balance of `_token` to the settlement
-   * @dev Skips zero balances: some tokens revert on zero-value transfers
-   * @param _token The token to sweep; BUY_ETH_ADDRESS for native ETH
-   */
+  /// @dev Sweeps the instance's full balance of `_token` to the settlement.
+  /// Skips zero balances: some tokens revert on zero-value transfers.
   function _sweep(
     address _token
   ) internal {
