@@ -102,11 +102,7 @@ contract Trampoline is ITrampoline {
     // unconsumed input is the delivery the delta check measures.
     if (_sellToken != _buyToken) _sweep(_sellToken);
 
-    uint256 _balanceAfter = _settlementBuyTokenBalance(_buyToken);
-    // Guard against underflow: if the balance decreased (route consumed settlement
-    // buffers), delta is zero and the floor check emits the meaningful revert
-    // instead of a generic Panic(0x11).
-    uint256 _delta = _balanceAfter > _buyBalanceBefore ? _balanceAfter - _buyBalanceBefore : 0;
+    uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
     if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
 
     emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
