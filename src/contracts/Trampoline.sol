@@ -121,12 +121,12 @@ contract Trampoline is ITrampoline {
     assembly ('memory-safe') {
       let _ptr := mload(0x40)
       mstore(_ptr, _typeHash)
-      mstore(add(_ptr, 0x20), calldataload(_proposal))                // orderUidHash
-      mstore(add(_ptr, 0x40), calldataload(add(_proposal, 0x20)))     // sellAmount
-      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40)))     // buyAmount
+      mstore(add(_ptr, 0x20), calldataload(_proposal)) // orderUidHash
+      mstore(add(_ptr, 0x40), calldataload(add(_proposal, 0x20))) // sellAmount
+      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40))) // buyAmount
       mstore(add(_ptr, 0x80), _interactionsHash)
-      mstore(add(_ptr, 0xa0), calldataload(add(_proposal, 0x60)))     // validUntil
-      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0x80)))     // nonce
+      mstore(add(_ptr, 0xa0), calldataload(add(_proposal, 0x60))) // validUntil
+      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0x80))) // nonce
       _structHash := keccak256(_ptr, 0xe0)
     }
 
@@ -148,7 +148,7 @@ contract Trampoline is ITrampoline {
       let _ptr := mload(0x40)
       mstore(_ptr, _digest)
       mstore(add(_ptr, 0x20), byte(0, calldataload(add(_signature.offset, 0x40))))
-      mstore(add(_ptr, 0x40), calldataload(_signature.offset))           // r
+      mstore(add(_ptr, 0x40), calldataload(_signature.offset)) // r
       mstore(add(_ptr, 0x60), calldataload(add(_signature.offset, 0x20))) // s
       pop(staticcall(gas(), 0x01, _ptr, 0x80, _ptr, 0x20))
       _recovered := mload(_ptr)

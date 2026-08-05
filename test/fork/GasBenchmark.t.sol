@@ -85,7 +85,11 @@ contract GasBenchmark is Test {
 
   // ───── Shared helpers ─────
 
-  function _quote(address _sellToken, address _buyToken, uint256 _sellAmount) internal view returns (uint256) {
+  function _quote(
+    address _sellToken,
+    address _buyToken,
+    uint256 _sellAmount
+  ) internal view returns (uint256) {
     address[] memory path = new address[](2);
     path[0] = _sellToken;
     path[1] = _buyToken;
@@ -101,8 +105,19 @@ contract GasBenchmark is Test {
   ) internal view returns (bytes memory) {
     bytes32 structHash = keccak256(
       abi.encode(
-        ORDER_TYPE_HASH, _sellToken, _buyToken, user, _sellAmount, _buyAmount, _validTo, bytes32(0), uint256(0),
-        KIND_SELL, false, BALANCE_ERC20, BALANCE_ERC20
+        ORDER_TYPE_HASH,
+        _sellToken,
+        _buyToken,
+        user,
+        _sellAmount,
+        _buyAmount,
+        _validTo,
+        bytes32(0),
+        uint256(0),
+        KIND_SELL,
+        false,
+        BALANCE_ERC20,
+        BALANCE_ERC20
       )
     );
     bytes32 digest = keccak256(abi.encodePacked('\x19\x01', SETTLEMENT.domainSeparator(), structHash));
@@ -110,7 +125,9 @@ contract GasBenchmark is Test {
     return abi.encodePacked(r, s, v);
   }
 
-  function _fundUserWeth(uint256 _sellAmount) internal {
+  function _fundUserWeth(
+    uint256 _sellAmount
+  ) internal {
     vm.deal(user, _sellAmount + 1 ether);
     vm.startPrank(user);
     WETH.deposit{value: _sellAmount}();
@@ -118,7 +135,9 @@ contract GasBenchmark is Test {
     vm.stopPrank();
   }
 
-  function _fundUserUsdc(uint256 _sellAmount) internal {
+  function _fundUserUsdc(
+    uint256 _sellAmount
+  ) internal {
     deal(address(USDC), user, _sellAmount);
     vm.startPrank(user);
     USDC.approve(SETTLEMENT.vaultRelayer(), _sellAmount);
@@ -188,16 +207,13 @@ contract GasBenchmark is Test {
 
     route_ = new ITrampoline.Interaction[](2);
     route_[0] = ITrampoline.Interaction({
-      target: _sellToken,
-      value: 0,
-      callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), _sellAmount))
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), _sellAmount))
     });
     route_[1] = ITrampoline.Interaction({
       target: address(UNIV2_ROUTER),
       value: 0,
       callData: abi.encodeCall(
-        IUniswapV2Router.swapExactTokensForTokens,
-        (_sellAmount, _minOut, path, _recipient, block.timestamp + 1 hours)
+        IUniswapV2Router.swapExactTokensForTokens, (_sellAmount, _minOut, path, _recipient, block.timestamp + 1 hours)
       )
     });
   }
@@ -215,23 +231,17 @@ contract GasBenchmark is Test {
 
     route_ = new ITrampoline.Interaction[](3);
     route_[0] = ITrampoline.Interaction({
-      target: _sellToken,
-      value: 0,
-      callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), _sellAmount))
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), _sellAmount))
     });
     route_[1] = ITrampoline.Interaction({
       target: address(UNIV2_ROUTER),
       value: 0,
       callData: abi.encodeCall(
-        IUniswapV2Router.swapExactTokensForTokens,
-        (_sellAmount, _minOut, path, _recipient, block.timestamp + 1 hours)
+        IUniswapV2Router.swapExactTokensForTokens, (_sellAmount, _minOut, path, _recipient, block.timestamp + 1 hours)
       )
     });
-    route_[2] = ITrampoline.Interaction({
-      target: address(WETH),
-      value: 0,
-      callData: abi.encodeCall(IWETH.withdraw, (_minOut))
-    });
+    route_[2] =
+      ITrampoline.Interaction({target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (_minOut))});
   }
 
   // ───── Path A: Direct settlement ─────
@@ -245,7 +255,8 @@ contract GasBenchmark is Test {
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
       _buildTrade(_sellToken, _buyToken, _sellAmount, _quotedOut);
 
-    ITrampoline.Interaction[] memory route = _swapRoute(_sellToken, _buyToken, _sellAmount, _quotedOut, address(SETTLEMENT));
+    ITrampoline.Interaction[] memory route =
+      _swapRoute(_sellToken, _buyToken, _sellAmount, _quotedOut, address(SETTLEMENT));
 
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = route;
@@ -254,7 +265,10 @@ contract GasBenchmark is Test {
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
-  function _settleDirectlyEth(uint256 _sellAmount, uint256 _quotedWeth) internal {
+  function _settleDirectlyEth(
+    uint256 _sellAmount,
+    uint256 _quotedWeth
+  ) internal {
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
       _buildTrade(address(USDC), BUY_ETH_ADDRESS, _sellAmount, _quotedWeth);
 
@@ -288,9 +302,7 @@ contract GasBenchmark is Test {
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](2);
     interactions[1][0] = ITrampoline.Interaction({
-      target: _sellToken,
-      value: 0,
-      callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
@@ -302,7 +314,10 @@ contract GasBenchmark is Test {
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
-  function _settleViaTrampolineToSelfEth(uint256 _sellAmount, uint256 _quotedWeth) internal {
+  function _settleViaTrampolineToSelfEth(
+    uint256 _sellAmount,
+    uint256 _quotedWeth
+  ) internal {
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
       _buildTrade(address(USDC), BUY_ETH_ADDRESS, _sellAmount, _quotedWeth);
 
@@ -315,9 +330,7 @@ contract GasBenchmark is Test {
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](2);
     interactions[1][0] = ITrampoline.Interaction({
-      target: address(USDC),
-      value: 0,
-      callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
+      target: address(USDC), value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
@@ -349,9 +362,7 @@ contract GasBenchmark is Test {
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](2);
     interactions[1][0] = ITrampoline.Interaction({
-      target: _sellToken,
-      value: 0,
-      callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
@@ -363,7 +374,10 @@ contract GasBenchmark is Test {
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
-  function _settleViaTrampolineToSettlementEth(uint256 _sellAmount, uint256 _quotedWeth) internal {
+  function _settleViaTrampolineToSettlementEth(
+    uint256 _sellAmount,
+    uint256 _quotedWeth
+  ) internal {
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
       _buildTrade(address(USDC), BUY_ETH_ADDRESS, _sellAmount, _quotedWeth);
 
@@ -379,9 +393,7 @@ contract GasBenchmark is Test {
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](3);
     interactions[1][0] = ITrampoline.Interaction({
-      target: address(USDC),
-      value: 0,
-      callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
+      target: address(USDC), value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
@@ -389,9 +401,7 @@ contract GasBenchmark is Test {
       callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(USDC), address(WETH), sig))
     });
     interactions[1][2] = ITrampoline.Interaction({
-      target: address(WETH),
-      value: 0,
-      callData: abi.encodeCall(IWETH.withdraw, (_quotedWeth))
+      target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (_quotedWeth))
     });
 
     vm.prank(solver, solver);
@@ -427,8 +437,12 @@ contract GasBenchmark is Test {
     console.log('');
     console.log('=== Gas Benchmark: WETH -> USDC (Uniswap V2, 1 ETH) ===');
     console.log('A  Direct (no trampoline):             %d gas', gasA);
-    console.log('B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA);
-    console.log('C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA);
+    console.log(
+      'B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA
+    );
+    console.log(
+      'C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
+    );
     console.log('   B vs C saving:                       %d gas', gasB - gasC);
     console.log('');
   }
@@ -460,8 +474,12 @@ contract GasBenchmark is Test {
     console.log('');
     console.log('=== Gas Benchmark: USDC -> ETH (Uniswap V2, 5000 USDC) ===');
     console.log('A  Direct (no trampoline):             %d gas', gasA);
-    console.log('B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA);
-    console.log('C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA);
+    console.log(
+      'B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA
+    );
+    console.log(
+      'C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
+    );
     console.log('   B vs C saving:                       %d gas', gasB - gasC);
     console.log('');
   }
