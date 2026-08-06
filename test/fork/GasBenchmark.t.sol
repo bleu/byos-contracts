@@ -31,6 +31,7 @@ contract GasBenchmark is Test {
     'Order(address sellToken,address buyToken,address receiver,uint256 sellAmount,uint256 buyAmount,uint32 validTo,bytes32 appData,uint256 feeAmount,string kind,bool partiallyFillable,string sellTokenBalance,string buyTokenBalance)'
   );
   bytes32 constant KIND_SELL = keccak256('sell');
+  bytes32 constant KIND_BUY = keccak256('buy');
   bytes32 constant BALANCE_ERC20 = keccak256('erc20');
 
   string rpcUrl;
@@ -92,6 +93,17 @@ contract GasBenchmark is Test {
     path[0] = _sellToken;
     path[1] = _buyToken;
     return UNIV2_ROUTER.getAmountsOut(_sellAmount, path)[1];
+  }
+
+  function _quoteIn(
+    address _sellToken,
+    address _buyToken,
+    uint256 _buyAmount
+  ) internal view returns (uint256) {
+    address[] memory path = new address[](2);
+    path[0] = _sellToken;
+    path[1] = _buyToken;
+    return UNIV2_ROUTER.getAmountsIn(_buyAmount, path)[0];
   }
 
   function _signOrder(
@@ -346,6 +358,146 @@ contract GasBenchmark is Test {
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
+  // ───── Buy order helpers ─────
+
+  function _signBuyOrder(
+    address _sellToken,
+    address _buyToken,
+    uint256 _sellAmount,
+    uint256 _buyAmount,
+    uint32 _validTo
+  ) internal view returns (bytes memory) {
+    bytes32 structHash = keccak256(
+      abi.encode(
+        ORDER_TYPE_HASH,
+        _sellToken,
+        _buyToken,
+        user,
+        _sellAmount,
+        _buyAmount,
+        _validTo,
+        bytes32(0),
+        uint256(0),
+        KIND_BUY,
+        false,
+        BALANCE_ERC20,
+        BALANCE_ERC20
+      )
+    );
+    bytes32 digest = keccak256(abi.encodePacked('\x19\x01', SETTLEMENT.domainSeparator(), structHash));
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
+    return abi.encodePacked(r, s, v);
+  }
+
+  function _buildBuyTrade(
+    address _sellToken,
+    address _buyToken,
+    uint256 _maxSellAmount,
+    uint256 _exactBuyAmount,
+    uint256 _actualSellAmount
+  ) internal view returns (address[] memory tokens_, uint256[] memory prices_, GPv2TradeData[] memory trades_) {
+    tokens_ = new address[](2);
+    tokens_[0] = _sellToken;
+    tokens_[1] = _buyToken;
+
+    prices_ = new uint256[](2);
+    prices_[0] = _exactBuyAmount;
+    prices_[1] = _actualSellAmount;
+
+    uint32 validTo = uint32(block.timestamp + 1 hours);
+    trades_ = new GPv2TradeData[](1);
+    trades_[0] = GPv2TradeData({
+      sellTokenIndex: 0,
+      buyTokenIndex: 1,
+      receiver: user,
+      sellAmount: _maxSellAmount,
+      buyAmount: _exactBuyAmount,
+      validTo: validTo,
+      appData: bytes32(0),
+      feeAmount: 0,
+      flags: 1, // buy order
+      executedAmount: _exactBuyAmount,
+      signature: _signBuyOrder(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, validTo)
+    });
+  }
+
+  /// @dev Builds a 2-interaction route for exact-output swap via Uniswap V2.
+  function _swapRouteExactOutput(
+    address _sellToken,
+    address _buyToken,
+    uint256 _amountInMax,
+    uint256 _exactOut,
+    address _recipient
+  ) internal view returns (ITrampoline.Interaction[] memory route_) {
+    address[] memory path = new address[](2);
+    path[0] = _sellToken;
+    path[1] = _buyToken;
+
+    route_ = new ITrampoline.Interaction[](2);
+    route_[0] = ITrampoline.Interaction({
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), _amountInMax))
+    });
+    route_[1] = ITrampoline.Interaction({
+      target: address(UNIV2_ROUTER),
+      value: 0,
+      callData: abi.encodeCall(
+        IUniswapV2Router.swapTokensForExactTokens,
+        (_exactOut, _amountInMax, path, _recipient, block.timestamp + 1 hours)
+      )
+    });
+  }
+
+  function _settleDirectlyBuyOrder(
+    address _sellToken,
+    address _buyToken,
+    uint256 _maxSellAmount,
+    uint256 _exactBuyAmount,
+    uint256 _quotedIn
+  ) internal {
+    (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
+      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _quotedIn);
+
+    ITrampoline.Interaction[] memory route =
+      _swapRouteExactOutput(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, address(SETTLEMENT));
+
+    ITrampoline.Interaction[][3] memory interactions;
+    interactions[1] = route;
+
+    vm.prank(solver, solver);
+    SETTLEMENT.settle(tokens, prices, trades, interactions);
+  }
+
+  function _settleViaTrampolineBuyOrder(
+    address _sellToken,
+    address _buyToken,
+    uint256 _maxSellAmount,
+    uint256 _exactBuyAmount,
+    uint256 _quotedIn
+  ) internal {
+    (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
+      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _quotedIn);
+
+    ITrampoline.Interaction[] memory route =
+      _swapRouteExactOutput(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, address(SETTLEMENT));
+
+    (ITrampoline.Proposal memory proposal, bytes memory sig) =
+      _signProposal(_maxSellAmount, _exactBuyAmount, route, keccak256('bench-buy'));
+
+    ITrampoline.Interaction[][3] memory interactions;
+    interactions[1] = new ITrampoline.Interaction[](2);
+    interactions[1][0] = ITrampoline.Interaction({
+      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _maxSellAmount))
+    });
+    interactions[1][1] = ITrampoline.Interaction({
+      target: address(trampoline),
+      value: 0,
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _sellToken, _buyToken, sig))
+    });
+
+    vm.prank(solver, solver);
+    SETTLEMENT.settle(tokens, prices, trades, interactions);
+  }
+
   // ───── Benchmarks ─────
 
   function test_gas_benchmark_weth_to_usdc() public onlyFork {
@@ -399,6 +551,39 @@ contract GasBenchmark is Test {
     console.log(
       'C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
     );
+    console.log('');
+  }
+
+  function test_gas_benchmark_buy_order_usdc_to_weth() public onlyFork {
+    // Buy order: user wants exactly 1 WETH, pays at most quotedIn + 1% of USDC.
+    // The route uses swapTokensForExactTokens; the router pulls only quotedIn,
+    // leaving 1% of USDC as dust in the trampoline. The sell-token sweep returns
+    // the dust to the settlement.
+    uint256 desiredWeth = 1 ether;
+    uint256 quotedIn = _quoteIn(address(USDC), address(WETH), desiredWeth);
+    uint256 maxSellAmount = quotedIn * 101 / 100;
+
+    _fundUserUsdc(maxSellAmount);
+    uint256 snap = vm.snapshotState();
+
+    // A: Direct buy order
+    vm.startSnapshotGas('A-buy');
+    _settleDirectlyBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth, quotedIn);
+    uint256 gasA = vm.stopSnapshotGas('A-buy');
+    assertTrue(vm.revertToState(snap));
+
+    // C: Trampoline buy order (sell-token sweep returns dust)
+    vm.startSnapshotGas('C-buy');
+    _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth, quotedIn);
+    uint256 gasC = vm.stopSnapshotGas('C-buy');
+
+    console.log('');
+    console.log('=== Gas Benchmark: Buy order USDC -> WETH (Uniswap V2, 1 ETH) ===');
+    console.log('A  Direct (no trampoline):             %d gas', gasA);
+    console.log(
+      'C  Trampoline (sell-token sweep):       %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
+    );
+    console.log('   Sell-token dust swept:               %d USDC', maxSellAmount - quotedIn);
     console.log('');
   }
 }
