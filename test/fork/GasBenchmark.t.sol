@@ -16,13 +16,11 @@ import {IUniswapV2Router} from '../interfaces/IUniswapV2Router.sol';
 import {IWETH} from '../interfaces/IWETH.sol';
 import {ProposalSigning} from '../utils/ProposalSigning.sol';
 
-/// @notice Gas benchmark comparing three settlement paths against the same
+/// @notice Gas benchmark comparing two settlement paths against the same
 /// Uniswap V2 swap on a mainnet fork:
 ///   A. Direct — Settlement executes the swap itself (no trampoline)
-///   B. Trampoline (output → trampoline) — route sends output to the instance,
-///      which sweeps it back to Settlement
 ///   C. Trampoline (output → Settlement) — route sends output directly to
-///      Settlement, sweep is a no-op, delta check still passes
+///      Settlement, sell-token sweep returns any unconsumed input
 contract GasBenchmark is Test {
   IGPv2Settlement constant SETTLEMENT = IGPv2Settlement(0x9008D19f58AAbD9eD0D60971565AA8510560ab41);
   IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -282,66 +280,6 @@ contract GasBenchmark is Test {
     SETTLEMENT.settle(tokens, prices, trades, interactions);
   }
 
-  // ───── Path B: Trampoline, route output → trampoline (current architecture) ─────
-
-  function _settleViaTrampolineToSelf(
-    address _sellToken,
-    address _buyToken,
-    uint256 _sellAmount,
-    uint256 _quotedOut
-  ) internal {
-    (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
-      _buildTrade(_sellToken, _buyToken, _sellAmount, _quotedOut);
-
-    ITrampoline.Interaction[] memory route =
-      _swapRoute(_sellToken, _buyToken, _sellAmount, _quotedOut, address(trampoline));
-
-    (ITrampoline.Proposal memory proposal, bytes memory sig) =
-      _signProposal(_sellAmount, _quotedOut, route, keccak256('bench-self'));
-
-    ITrampoline.Interaction[][3] memory interactions;
-    interactions[1] = new ITrampoline.Interaction[](2);
-    interactions[1][0] = ITrampoline.Interaction({
-      target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
-    });
-    interactions[1][1] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _sellToken, _buyToken, sig))
-    });
-
-    vm.prank(solver, solver);
-    SETTLEMENT.settle(tokens, prices, trades, interactions);
-  }
-
-  function _settleViaTrampolineToSelfEth(
-    uint256 _sellAmount,
-    uint256 _quotedWeth
-  ) internal {
-    (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
-      _buildTrade(address(USDC), BUY_ETH_ADDRESS, _sellAmount, _quotedWeth);
-
-    ITrampoline.Interaction[] memory route =
-      _swapRouteWithUnwrap(address(USDC), _sellAmount, _quotedWeth, address(trampoline));
-
-    (ITrampoline.Proposal memory proposal, bytes memory sig) =
-      _signProposal(_sellAmount, _quotedWeth, route, keccak256('bench-self-eth'));
-
-    ITrampoline.Interaction[][3] memory interactions;
-    interactions[1] = new ITrampoline.Interaction[](2);
-    interactions[1][0] = ITrampoline.Interaction({
-      target: address(USDC), value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
-    });
-    interactions[1][1] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(USDC), BUY_ETH_ADDRESS, sig))
-    });
-
-    vm.prank(solver, solver);
-    SETTLEMENT.settle(tokens, prices, trades, interactions);
-  }
-
   // ───── Path C: Trampoline, route output → Settlement ─────
 
   function _settleViaTrampolineToSettlement(
@@ -423,12 +361,6 @@ contract GasBenchmark is Test {
     uint256 gasA = vm.stopSnapshotGas('A');
     assertTrue(vm.revertToState(snap));
 
-    // B: Trampoline, output → trampoline
-    vm.startSnapshotGas('B');
-    _settleViaTrampolineToSelf(address(WETH), address(USDC), sellAmount, quotedOut);
-    uint256 gasB = vm.stopSnapshotGas('B');
-    assertTrue(vm.revertToState(snap));
-
     // C: Trampoline, output → Settlement
     vm.startSnapshotGas('C');
     _settleViaTrampolineToSettlement(address(WETH), address(USDC), sellAmount, quotedOut);
@@ -438,12 +370,8 @@ contract GasBenchmark is Test {
     console.log('=== Gas Benchmark: WETH -> USDC (Uniswap V2, 1 ETH) ===');
     console.log('A  Direct (no trampoline):             %d gas', gasA);
     console.log(
-      'B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA
-    );
-    console.log(
       'C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
     );
-    console.log('   B vs C saving:                       %d gas', gasB - gasC);
     console.log('');
   }
 
@@ -460,12 +388,6 @@ contract GasBenchmark is Test {
     uint256 gasA = vm.stopSnapshotGas('A-eth');
     assertTrue(vm.revertToState(snap));
 
-    // B: Trampoline, output → trampoline
-    vm.startSnapshotGas('B-eth');
-    _settleViaTrampolineToSelfEth(sellAmount, quotedWeth);
-    uint256 gasB = vm.stopSnapshotGas('B-eth');
-    assertTrue(vm.revertToState(snap));
-
     // C: Trampoline, output → Settlement
     vm.startSnapshotGas('C-eth');
     _settleViaTrampolineToSettlementEth(sellAmount, quotedWeth);
@@ -475,12 +397,8 @@ contract GasBenchmark is Test {
     console.log('=== Gas Benchmark: USDC -> ETH (Uniswap V2, 5000 USDC) ===');
     console.log('A  Direct (no trampoline):             %d gas', gasA);
     console.log(
-      'B  Trampoline (output -> trampoline):   %d gas  (+%d / +%d%%)', gasB, gasB - gasA, ((gasB - gasA) * 100) / gasA
-    );
-    console.log(
       'C  Trampoline (output -> settlement):   %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
     );
-    console.log('   B vs C saving:                       %d gas', gasB - gasC);
     console.log('');
   }
 }

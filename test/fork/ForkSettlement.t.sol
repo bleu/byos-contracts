@@ -95,19 +95,18 @@ contract ForkSettlementTest is Test {
     return UNIV2_ROUTER.getAmountsOut(sellAmount, path)[1];
   }
 
-  /// @dev Route: approve router, swap sellToken -> buyToken; optionally unwrap the
-  /// WETH output to native ETH (wrap/unwrap is route responsibility, ADR-0001).
+  /// @dev Route: approve router, swap sellToken -> buyToken, delivering output
+  /// directly to the settlement contract.
   function _swapRoute(
     address sellToken,
     address buyToken,
     uint256 sellAmount,
-    uint256 buyAmountOut,
-    bool unwrap
+    uint256 buyAmountOut
   ) internal view returns (ITrampoline.Interaction[] memory route) {
     address[] memory path = new address[](2);
     path[0] = sellToken;
     path[1] = buyToken;
-    route = new ITrampoline.Interaction[](unwrap ? 3 : 2);
+    route = new ITrampoline.Interaction[](2);
     route[0] = ITrampoline.Interaction({
       target: sellToken, value: 0, callData: abi.encodeCall(IERC20.approve, (address(UNIV2_ROUTER), sellAmount))
     });
@@ -116,14 +115,9 @@ contract ForkSettlementTest is Test {
       value: 0,
       callData: abi.encodeCall(
         IUniswapV2Router.swapExactTokensForTokens,
-        (sellAmount, buyAmountOut, path, address(trampoline), block.timestamp + 1 hours)
+        (sellAmount, buyAmountOut, path, address(SETTLEMENT), block.timestamp + 1 hours)
       )
     });
-    if (unwrap) {
-      route[2] = ITrampoline.Interaction({
-        target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (buyAmountOut))
-      });
-    }
   }
 
   function _signProposal(
@@ -239,7 +233,7 @@ contract ForkSettlementTest is Test {
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
     uint256 clearingOut = quotedOut * 99 / 100;
     SignedProposal memory prop =
-      _signProposal(sellAmount, clearingOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut, false));
+      _signProposal(sellAmount, clearingOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
 
     uint256 settlementWethBefore = WETH.balanceOf(address(SETTLEMENT));
     uint256 settlementUsdcBefore = USDC.balanceOf(address(SETTLEMENT));
@@ -273,7 +267,7 @@ contract ForkSettlementTest is Test {
 
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
     SignedProposal memory prop =
-      _signProposal(sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut, false));
+      _signProposal(sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
 
     // BYOS settles the proposal; from here on its calldata is public.
     _settleOrder(address(WETH), address(USDC), sellAmount, quotedOut, prop);
@@ -308,15 +302,55 @@ contract ForkSettlementTest is Test {
 
     uint256 quotedOut = _quote(address(USDC), address(WETH), sellAmount);
     uint256 clearingOut = quotedOut * 99 / 100;
-    // Swap USDC -> WETH, then unwrap: the trampoline sweeps native ETH. The floor
-    // and clearing amount sit below the quote, so the sweep over-delivers.
-    SignedProposal memory prop =
-      _signProposal(sellAmount, clearingOut, _swapRoute(address(USDC), address(WETH), sellAmount, quotedOut, true));
+    // Route sends WETH to Settlement; the delta check tracks WETH growth. A
+    // post-execute interaction unwraps the WETH so Settlement can pay in ETH.
+    ITrampoline.Interaction[] memory route = _swapRoute(address(USDC), address(WETH), sellAmount, quotedOut);
+    SignedProposal memory prop = _signProposal(sellAmount, clearingOut, route);
 
     uint256 userEthBefore = user.balance;
     uint256 settlementEthBefore = address(SETTLEMENT).balance;
 
-    _settleOrder(address(USDC), BUY_ETH, sellAmount, clearingOut, prop);
+    // Build settlement inline: needs a post-execute unwrap that _settleOrder doesn't support.
+    address[] memory tokens = new address[](2);
+    tokens[0] = address(USDC);
+    tokens[1] = BUY_ETH;
+    uint256[] memory prices = new uint256[](2);
+    prices[0] = clearingOut;
+    prices[1] = sellAmount;
+    GPv2TradeData[] memory trades = new GPv2TradeData[](1);
+    trades[0] = GPv2TradeData({
+      sellTokenIndex: 0,
+      buyTokenIndex: 1,
+      receiver: user,
+      sellAmount: sellAmount,
+      buyAmount: clearingOut * 99 / 100,
+      validTo: uint32(block.timestamp + 1 hours),
+      appData: bytes32(0),
+      feeAmount: 0,
+      flags: 0,
+      executedAmount: sellAmount,
+      signature: _signOrder(
+        address(USDC), BUY_ETH, sellAmount, clearingOut * 99 / 100, uint32(block.timestamp + 1 hours)
+      )
+    });
+
+    ITrampoline.Interaction[][3] memory interactions;
+    interactions[1] = new ITrampoline.Interaction[](3);
+    interactions[1][0] = ITrampoline.Interaction({
+      target: address(USDC), value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), sellAmount))
+    });
+    interactions[1][1] = ITrampoline.Interaction({
+      target: address(trampoline),
+      value: 0,
+      callData: abi.encodeCall(
+        ITrampoline.execute, (prop.data, prop.route, address(USDC), address(WETH), prop.signature)
+      )
+    });
+    interactions[1][2] =
+      ITrampoline.Interaction({target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (quotedOut))});
+
+    vm.prank(solver, solver);
+    SETTLEMENT.settle(tokens, prices, trades, interactions);
 
     // The ETH surplus stays in the settlement; the instance ends empty.
     assertEq(user.balance - userEthBefore, clearingOut);

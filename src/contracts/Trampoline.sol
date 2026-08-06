@@ -90,10 +90,7 @@ contract Trampoline is ITrampoline {
       }
     }
 
-    _sweep(_buyToken);
-    // Same-token hook orders (sellToken == buyToken) sweep once: the returned
-    // unconsumed input is the delivery the delta check measures.
-    if (_sellToken != _buyToken) _sweep(_sellToken);
+    _sweep(_sellToken);
 
     uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
     if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);

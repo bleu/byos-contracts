@@ -10,9 +10,10 @@ contract MockRouter {
     IERC20 sellToken,
     IERC20 buyToken,
     uint256 sellAmount,
-    uint256 buyAmount
+    uint256 buyAmount,
+    address recipient
   ) external {
     require(sellToken.transferFrom(msg.sender, address(this), sellAmount), 'MockRouter: pull failed');
-    require(buyToken.transfer(msg.sender, buyAmount), 'MockRouter: pay failed');
+    require(buyToken.transfer(recipient, buyAmount), 'MockRouter: pay failed');
   }
 }

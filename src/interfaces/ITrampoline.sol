@@ -22,9 +22,10 @@ bytes32 constant PROPOSAL_TYPEHASH = keccak256(
  * @author CoW Protocol Developers
  * @notice Per-sub-solver execution sandbox. Receives the trade's sell tokens from
  * GPv2Settlement, runs the sub-solver's EIP-712-signed route in a fund-less context,
- * sweeps its full remaining balance of both trade tokens back to the settlement
+ * sweeps its full remaining balance of the sell token back to the settlement
  * contract, and enforces the signed buy amount as a floor on the settlement's
- * buy-token balance growth. One immutable instance per sub-solver at a deterministic
+ * buy-token balance growth. Routes are expected to deliver buy-token output directly
+ * to the settlement. One immutable instance per sub-solver at a deterministic
  * CREATE2 address (ADR-0001).
  */
 interface ITrampoline {
@@ -152,24 +153,23 @@ interface ITrampoline {
 
   /**
    * @notice Executes a sub-solver's signed route, sweeps the instance's full
-   * remaining balance of both trade tokens to the settlement contract, and reverts
+   * remaining balance of the sell token to the settlement contract, and reverts
    * unless the settlement's buy-token balance grew by at least `_proposal.buyAmount`
    * @dev Callable only by the settlement contract, and only in a settlement submitted
    * by a BYOS submitter: tx.origin must hold the Escrow's SUBMITTER_ROLE, since a live
    * proposal's calldata is public and any allow-listed solver could otherwise replay it
    * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): buyAmount is
    * the floor the sub-solver signed, measured as the growth of the settlement's
-   * buy-token balance between entry and return, so routes that deliver output to the
-   * settlement directly also count. Anything above the floor lands in the settlement
-   * as BYOS-owned slippage (ADR-0008); the instance ends every settlement holding
-   * none of the trade tokens. The tokens are BYOS-supplied call parameters taken from
-   * the order, not signed proposal fields. When `_buyToken` is BUY_ETH_ADDRESS the
-   * snapshot, sweep, and delta are in native ETH. Zero balances are not swept (some
-   * tokens revert on zero-value transfers), and when the trade's tokens are the same
-   * address (same-token hook orders) the shared token is swept once.
+   * buy-token balance between entry and return. Routes are expected to deliver
+   * buy-token output directly to the settlement; the instance does not sweep it.
+   * Anything above the floor lands in the settlement as BYOS-owned slippage
+   * (ADR-0008). The tokens are BYOS-supplied call parameters taken from the order,
+   * not signed proposal fields. When `_buyToken` is BUY_ETH_ADDRESS the snapshot and
+   * delta are in native ETH. Zero sell-token balances are not swept (some tokens
+   * revert on zero-value transfers).
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
-   * @param _sellToken The trade's sell token, swept back along with the buy token
+   * @param _sellToken The trade's sell token, swept back to the settlement
    * @param _buyToken The trade's buy token; BUY_ETH_ADDRESS for native ETH
    * @param _signature Sub-solver's EIP-712 signature over the proposal
    */
