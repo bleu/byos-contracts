@@ -37,39 +37,7 @@ The warm savings entry is negative because the delta check's before-snapshot rea
 
 The numbers above are for sell orders, where the route consumes all sellToken and sends output directly to Settlement -- both sweeps are no-ops. In buy orders using `swapTokensForExactTokens`, the route leaves unconsumed sellToken in the Trampoline. The sellToken sweep then does a real `safeTransfer` back to Settlement, adding ~25,000 gas on top of the baseline.
 
-## Applied Optimizations
-
-Two changes were applied to the Trampoline contract, reducing overhead from ~69k to ~67k:
-
-**Inline `SUBMITTER_ROLE` hash** (-655 gas): The Trampoline previously made two external calls to the Escrow -- `SUBMITTER_ROLE()` to fetch the role hash, then `hasRole()` to check membership. Since the role hash is a constant (`keccak256('SUBMITTER_ROLE')`), it is now inlined as a file-level constant, eliminating the first external call.
-
-**Assembly for hashing, ecrecover, and interaction dispatch** (-1,120 gas): Three hot paths were rewritten in inline assembly:
-
-- _Interaction dispatch loop_: Solidity allocates `bytes memory _returnData` on every `call`, even on success when the data is never read. The assembly version skips return data allocation on success and only copies return data on revert (for error bubbling).
-- _EIP-712 hashing_: The struct hash and typed data hash are built in scratch memory without advancing the free memory pointer, avoiding `abi.encode` memory allocation.
-- _Signature recovery_: Raw `ecrecover` precompile call replaces the OpenZeppelin `ECDSA.recover` library, skipping s-value malleability checks and signature length validation. The nonce in the proposal handles replay; s-malleability is not a concern.
-
-| | Gas |
-|---|---|
-| Before optimizations | 268,981 |
-| After inline submitter role | 268,326 |
-| After assembly optimizations | 267,206 |
-| **Total saved** | **1,775** |
-
-## Other Changes Discussed
-
-### Route output directly to Settlement (driver-level, no contract change)
-
-The sub-solver's route can set the swap's `to` parameter to Settlement instead of the Trampoline instance. The Trampoline's `_sweep` finds zero buyToken balance and skips the `safeTransfer` back. The balance-delta check still passes because Settlement's balance grew from the router's direct output. This saves ~19-26k gas depending on the scenario and is purely a routing decision by the BYOS driver -- the current contract already supports it.
-
-Measured impact (before other optimizations):
-
-| Scenario | Output to Trampoline | Output to Settlement | Saved |
-|---|---|---|---|
-| WETH to USDC | 294,740 | 268,981 | 25,759 |
-| USDC to ETH | 304,416 | 285,773 | 18,643 |
-
-The ERC20 case saves more because it fully eliminates a `safeTransfer`. The ETH case still needs a Settlement-level `WETH.withdraw` interaction after `execute` returns, since the Trampoline cannot unwrap WETH it doesn't hold.
+## Other Optimizations Considered
 
 ### Remove on-chain signature verification (-3,200 gas)
 
@@ -78,10 +46,6 @@ The `ecrecover` + EIP-712 hashing exists for non-repudiation: it prevents BYOS f
 ### Drop `Executed` event (-1,500 gas)
 
 The event emits `orderUidHash`, `delta`, and `floor` on every successful execution. The BYOS service already tracks these values off-chain via simulation and proposal lifecycle. Removing the event loses on-chain observability for third-party monitoring and historical queries.
-
-### Skip buyToken sweep (-3,300 gas)
-
-When output is routed to Settlement, the buyToken sweep always finds zero balance. Skipping it saves a cold `balanceOf` call on the Trampoline. However, this bakes a routing assumption into the contract -- if a route ever sends output to the Trampoline (intentionally or by mistake), the tokens would be stranded.
 
 ### Remove delta check (-11,100 gas)
 
