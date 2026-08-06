@@ -24,7 +24,7 @@ the protocol computes off-chain who owes what and settles up.
 
 | Fee | What it covers | Who receives it | How the amount is set |
 |---|---|---|---|
-| Network fee | Gas of the settlement | The solver — the cut parks in the settlement's buffers and reaches the solver through the weekly payout, in native token | Solver's own cut, typically in the sell token; the protocol does **not** reimburse gas |
+| Network fee | Gas of the settlement | The solver — the cut parks in the settlement's buffers and reaches the solver through the weekly payout, in native token | Solver's own cut, typically in the sell token; the protocol does **not** reimburse gas. **BYOS caveat:** the sell-token channel is unavailable — the sub-solver signs for the full `sellAmount` and the Trampoline enforces delivery against the signed `buyAmount`, so the cut is always a clearing-price shift on the buy side (see [ADR-0003](../adr/0003-trampoline-deployment-settlement-integration.md):33–37) |
 | Protocol fee | CoW DAO revenue | CoW DAO | Fee policies attached to each order by the autopilot (surplus %, volume %, price improvement) |
 | Partner fee | Integrator revenue | The partner | Declared in the order's appData, capped by the protocol |
 
@@ -237,6 +237,15 @@ Consequences:
 4. Penalty passthrough is trackable per auction in near real time via the competition endpoint,
    which supports the planned per-sub-solver running balance with a cutoff at the known worst
    case (`c_l`).
+5. There is no reimbursement in either direction. What returns to the solver in the weekly payout
+   is margin the solver chose not to pass on to the user — the amount is set entirely by its
+   quoting, not by its gas spend. A sub-solver that quotes the exact route output (zero wedge)
+   gets nothing back regardless of how much gas the settlement cost.
+6. CIP-85 consistency rewards (line 198) have a sizing consequence: they are allocated by how
+   close a solver's bids sit to the winner across every order it bids on, won or lost. A larger
+   gas cut worsens the solver's closeness-to-winner score on every bid, costing bucket share even
+   in auctions it never wins. The cut is therefore never free and should be sized with this
+   cross-auction cost in mind.
 
 The enforcement-layer mapping, revised: autopilot recompute → CoW-run driver (protocol fees) plus
 BYOS gatekeeper (gas + feasibility); weekly netting → per-sub-solver running balance off the
