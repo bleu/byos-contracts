@@ -122,4 +122,38 @@ contract IntegrationTest is EscrowTestBase {
     escrow.setCooldownPeriod(2 days);
     assertInvariant();
   }
+
+  // --- Threat analysis coverage ---
+
+  function test_force_sent_eth_breaks_invariant_benignly() public {
+    // Threat 5: force-sent ETH (via SELFDESTRUCT / coinbase reward) breaks the
+    // totalSupply + accumulatedDebits == balance invariant in the benign direction
+    // (more ETH than tokens). The excess is permanently stuck but all operations
+    // still work.
+    escrow.deposit{value: 10 ether}(subSolver);
+    assertInvariant();
+
+    // Simulate force-sent ETH (SELFDESTRUCT or coinbase reward bypasses receive())
+    vm.deal(address(escrow), address(escrow).balance + 1 ether);
+
+    // Invariant broken: more ETH than tokens
+    assertGt(address(escrow).balance, escrow.totalSupply() + escrow.accumulatedDebits());
+    assertEq(address(escrow).balance, 11 ether);
+    assertEq(escrow.totalSupply() + escrow.accumulatedDebits(), 10 ether);
+
+    // All operations still work despite the excess
+    vm.prank(op);
+    escrow.debit(subSolver, 2 ether, keccak256('reason'));
+    escrow.withdrawDebits();
+    escrow.deposit{value: 3 ether}(subSolver2);
+
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
+    vm.warp(block.timestamp + COOLDOWN);
+    vm.prank(subSolver);
+    escrow.executeWithdrawal();
+
+    // The excess 1 ether is permanently stuck
+    assertGt(address(escrow).balance, escrow.totalSupply() + escrow.accumulatedDebits());
+  }
 }

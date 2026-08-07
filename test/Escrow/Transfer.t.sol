@@ -131,4 +131,59 @@ contract TransferTest is EscrowTestBase {
     assertEq(escrow.balanceOf(newKey), 10 ether);
     assertInvariant();
   }
+
+  // --- Threat analysis coverage ---
+
+  function test_transfer_front_runs_debit() public {
+    // Gap G7: between a revert event and the operator calling pause/freeze,
+    // a sub-solver can transfer its balance to a fresh address, making the
+    // operator's debit fail. The mitigation path is freeze + debit the new address.
+    address freshAddr = makeAddr('freshAddr');
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    // Sub-solver moves funds before operator can react
+    vm.prank(subSolver);
+    escrow.transfer(freshAddr, 10 ether);
+
+    // Operator's debit on the original address fails — balance is gone
+    vm.prank(op);
+    vm.expectRevert(IEscrow.Escrow_InsufficientBalance.selector);
+    escrow.debit(subSolver, 10 ether, keccak256('revert-penalty'));
+
+    // Mitigation: operator freezes the new address and debits it
+    vm.startPrank(op);
+    escrow.freeze(freshAddr);
+    escrow.debit(freshAddr, 10 ether, keccak256('revert-penalty'));
+    vm.stopPrank();
+
+    assertEq(escrow.balanceOf(freshAddr), 0);
+    assertInvariant();
+  }
+
+  function test_transfer_to_escrow_contract_sticks_tokens() public {
+    // Threat 11: tokens transferred to the escrow's own address are unreachable.
+    // No one controls the escrow's "account", so those tokens can never be
+    // withdrawn or debited. The contract remains over-collateralized but functional.
+    escrow.deposit{value: 10 ether}(subSolver);
+
+    vm.prank(subSolver);
+    escrow.transfer(address(escrow), 5 ether);
+
+    assertEq(escrow.balanceOf(address(escrow)), 5 ether);
+    assertEq(escrow.balanceOf(subSolver), 5 ether);
+
+    // Over-collateralized: 10 ether ETH backing 10 ether totalSupply,
+    // but 5 ether of tokens are unreachable
+    assertEq(address(escrow).balance, 10 ether);
+    assertEq(escrow.totalSupply(), 10 ether);
+
+    // All normal operations still work
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
+    vm.warp(block.timestamp + COOLDOWN);
+    vm.prank(subSolver);
+    escrow.executeWithdrawal();
+    assertEq(subSolver.balance, 5 ether);
+    assertInvariant();
+  }
 }
