@@ -11,9 +11,10 @@ backs with tests, what such a route can and cannot reach.
 The guarantee is structural rather than filtered. Routes execute as the Trampoline
 instance (`msg.sender` is the instance), never as `GPv2Settlement`, so they inherit none
 of the settlement's buffer-spend or approval-granting authority ([ADR-0001](../adr/0001-trampoline-topology.md)).
-`execute` sweeps the instance's full remaining balance of both trade tokens to the
-settlement ([ADR-0008](../adr/0008-residue-disposition.md)), so the instance is empty of
-trade tokens at rest, and each sub-solver has a distinct instance. The blast radius of
+`execute` sweeps the instance's remaining sell-token balance to the settlement
+([ADR-0008](../adr/0008-residue-disposition.md)); buy-token output is delivered directly
+to the settlement by the route. The instance is empty of trade tokens at rest, and each
+sub-solver has a distinct instance. The blast radius of
 any route is the trade capital in flight during its own settlement.
 
 The tests demonstrate this against the **real deployed `GPv2Settlement`** on a mainnet
@@ -33,7 +34,7 @@ adversary wants the settlement to complete unattributed rather than self-abort.
 
 | Target | Reachable by a route | Why | Backing |
 | --- | --- | --- | --- |
-| Own instance balance, in flight | **yes** | The route runs as the instance, so during its own settlement it moves the instance's balance freely. This is the boundary's positive edge, and isolation is instance-scoped, not token-scoped: a route reaches the capital passing through its own instance while the settlement's buffer of the same token stays put. At rest there is nothing left to reach — the sweep empties the instance of trade tokens, so a planted approval drains nothing. | Cited: `test_execute_sweeps_full_route_output_and_emits_executed`, `test_execute_buy_order_sweeps_unconsumed_sell_token_to_settlement`, `test_planted_approval_cannot_reach_other_instances_residue` (`test/Trampoline/Trampoline.t.sol`) |
+| Own instance balance, in flight | **yes** | The route runs as the instance, so during its own settlement it moves the instance's balance freely. This is the boundary's positive edge, and isolation is instance-scoped, not token-scoped: a route reaches the capital passing through its own instance while the settlement's buffer of the same token stays put. At rest there is nothing left to reach — the sell-token sweep and direct buy-token delivery empty the instance of trade tokens, so a planted approval drains nothing. | Cited: `test_execute_sweeps_full_route_output_and_emits_executed`, `test_execute_buy_order_sweeps_unconsumed_sell_token_to_settlement`, `test_planted_approval_cannot_reach_other_instances_residue` (`test/Trampoline/Trampoline.t.sol`) |
 | Settlement token buffers | no | A `transferFrom` from the settlement needs an allowance the settlement never granted the instance. Proven inside a *successful* settlement where the failed attempt is swallowed, so the guarantee holds even when the transaction finalizes rather than aborting. | `test_settlement_succeeds_but_buffer_transferFrom_moves_nothing` |
 | Settlement via re-entering `settle()` | no | `settle` is `nonReentrant onlySolver`. A route always runs inside a live `settle`, so the reentrancy guard (the first modifier) reverts before `onlySolver` is even reached. `onlySolver` is the backstop that applies if the guard weren't engaged — the instance is not an allow-listed solver. | `test_route_cannot_reenter_settle` (guard), `test_route_settle_call_is_rejected_by_onlySolver` (backstop) |
 | Another party's order state | no | `setPreSignature` and `invalidateOrder` require the order's encoded owner to equal `msg.sender`. A route is the instance, so it cannot pre-sign or cancel an order owned by anyone else; the victim's state is unchanged. A route can pre-sign an order it *owns*, but nobody places orders naming a Trampoline, so that capability is inert. | `test_route_cannot_presign_another_owners_order`, `test_route_cannot_invalidate_another_owners_order` |

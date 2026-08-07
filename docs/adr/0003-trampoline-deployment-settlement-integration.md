@@ -69,10 +69,10 @@ amount has been pulled in):
    accounting expects it.
 2. `Trampoline_S.execute(proposal, route, sellToken, buyToken, signature)` records the
    settlement's buy-token balance, runs the sub-solver's `route` (raw interactions
-   from the proposal, which may deliver output to the settlement directly), then its
-   own contract code sweeps the instance's full remaining balance of both trade
-   tokens to `GPv2Settlement` and reverts unless the settlement's buy-token balance
-   delta covers `buyAmount` — the signed floor.
+   from the proposal, delivering buy-token output directly to the settlement), then
+   its own contract code sweeps the instance's remaining sell-token balance to
+   `GPv2Settlement` and reverts unless the settlement's buy-token balance delta covers
+   `buyAmount` — the signed floor.
 
 `GPv2Settlement` then pays the user via `transferToAccounts` out of its now-replenished
 balance.
@@ -132,9 +132,9 @@ filters thin ones is service policy, out of scope here.
 ### Both order kinds, one mechanism
 
 Nothing above is specific to sell orders. For either kind the instance receives the
-signed `sellAmount`, runs the route, sweeps both trade tokens, and `execute` asserts
-the same buy-token delta floor. What changes is which amount the user fixed, and so
-where the slack shows up:
+signed `sellAmount`, runs the route, sweeps the sell token, and `execute` asserts the
+same buy-token delta floor. Routes deliver buy-token output directly to the settlement.
+What changes is which amount the user fixed, and so where the slack shows up:
 
 | | Sell order | Buy order |
 |---|---|---|
@@ -151,10 +151,9 @@ are in [docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md
 The mechanism also covers same-token hook orders (`sellToken == buyToken`, always with
 `sellAmount > buyAmount`), where the user submits the order mainly to run hooks and
 the difference funds them. The delta check stays sound because the snapshot is taken
-after the funding transfer has already left `GPv2Settlement`: the sweep returning the
-unconsumed input is the delivery it measures, and the floor still guarantees the
-settlement is never net-drained. The shared token is swept once; `execute` must not
-reject equal addresses.
+after the funding transfer has already left `GPv2Settlement`: the sell-token sweep
+returning the unconsumed input is the delivery it measures, and the floor still
+guarantees the settlement is never net-drained.
 
 ### Infra-failure attribution
 
@@ -194,8 +193,8 @@ established that settlement-parked surplus returns to the solver weekly.
 
 ## Consequences
 
-- The hot path stays minimal: one transfer in, `execute` (route, sweep, one delta
-  assertion per settlement), and the instance ends every settlement empty of trade
+- The hot path stays minimal: one transfer in, `execute` (route, sell-token sweep, one
+  delta assertion per settlement), and the instance ends every settlement empty of trade
   tokens.
 - Self-funding is structural rather than a hope. A sub-solver's settlement can never
   net-drain BYOS's buffers, since the delta check reverts on shortfall.

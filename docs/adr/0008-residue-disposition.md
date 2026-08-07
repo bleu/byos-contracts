@@ -36,13 +36,14 @@ review, 2026-07-22):
 
 ## Decision
 
-There is no residue. `execute` sweeps the instance's full remaining balance of both
-trade tokens to `GPv2Settlement` and enforces `buyAmount` as a floor via the
-balance-delta check ([ADR-0003](0003-trampoline-deployment-settlement-integration.md)):
-the instance ends every settlement holding none of the trade tokens. Over-delivery and
-unconsumed sell tokens are BYOS-owned settlement slippage, returned weekly by CoW's
-accounting. The claim functions are removed; the trampoline keeps zero privileged
-keys — with nothing resting in the instance, nobody needs one.
+There is no residue. Routes deliver buy-token output directly to `GPv2Settlement`.
+`execute` sweeps the instance's remaining sell-token balance to `GPv2Settlement` and
+enforces `buyAmount` as a floor via the balance-delta check
+([ADR-0003](0003-trampoline-deployment-settlement-integration.md)): the instance ends
+every settlement holding none of the trade tokens. Over-delivery and unconsumed sell
+tokens are BYOS-owned settlement slippage, returned weekly by CoW's accounting. The
+claim functions are removed; the trampoline keeps zero privileged keys — with nothing
+resting in the instance, nobody needs one.
 
 ### Strays are written off
 

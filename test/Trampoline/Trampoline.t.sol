@@ -86,7 +86,7 @@ contract TrampolineTest is Test {
   }
 
   /// @dev A route that approves the router and swaps the full SELL_AMOUNT for
-  /// `buyAmountOut` of buyToken.
+  /// `buyAmountOut` of buyToken, delivering output directly to the settlement.
   function _swapRoute(
     uint256 buyAmountOut
   ) internal view returns (ITrampoline.Interaction[] memory route) {
@@ -94,7 +94,7 @@ contract TrampolineTest is Test {
   }
 
   /// @dev A route that approves the router and swaps `sellAmountIn` of sellToken for
-  /// `buyAmountOut` of buyToken.
+  /// `buyAmountOut` of buyToken, delivering output directly to the settlement.
   function _swapRoute(
     uint256 sellAmountIn,
     uint256 buyAmountOut
@@ -106,7 +106,7 @@ contract TrampolineTest is Test {
     route[1] = ITrampoline.Interaction({
       target: address(router),
       value: 0,
-      callData: abi.encodeCall(MockRouter.swap, (sellToken, buyToken, sellAmountIn, buyAmountOut))
+      callData: abi.encodeCall(MockRouter.swap, (sellToken, buyToken, sellAmountIn, buyAmountOut, settlement))
     });
   }
 
@@ -418,21 +418,21 @@ contract TrampolineTest is Test {
 
   // --- Native ETH ---
 
-  function test_execute_native_eth_buy_sweeps_over_delivery_to_settlement() public {
-    // For BUY_ETH_ADDRESS the snapshot, sweep, and delta are the settlement's native
-    // ETH balance. Route output lands as WETH in the instance and the signed route's
-    // final leg unwraps it (wrap/unwrap is route responsibility, ADR-0001); the sweep
-    // sends the instance's whole ETH balance, floor and surplus alike.
+  function test_execute_native_eth_buy_delivers_to_settlement_via_route() public {
+    // For BUY_ETH_ADDRESS the snapshot and delta track the settlement's native ETH
+    // balance. The route unwraps WETH to ETH and sends it directly to the settlement;
+    // the trampoline does not sweep buy-token output.
     uint256 surplus = 2 ether;
     MockWETH weth = new MockWETH();
     vm.deal(address(this), BUY_AMOUNT + surplus);
     weth.deposit{value: BUY_AMOUNT + surplus}();
     assertTrue(weth.transfer(address(trampoline), BUY_AMOUNT + surplus));
 
-    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](2);
     route[0] = ITrampoline.Interaction({
       target: address(weth), value: 0, callData: abi.encodeCall(MockWETH.withdraw, (BUY_AMOUNT + surplus))
     });
+    route[1] = ITrampoline.Interaction({target: settlement, value: BUY_AMOUNT + surplus, callData: ''});
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
@@ -449,10 +449,11 @@ contract TrampolineTest is Test {
     weth.deposit{value: BUY_AMOUNT - 1}();
     assertTrue(weth.transfer(address(trampoline), BUY_AMOUNT - 1));
 
-    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](2);
     route[0] = ITrampoline.Interaction({
       target: address(weth), value: 0, callData: abi.encodeCall(MockWETH.withdraw, (BUY_AMOUNT - 1))
     });
+    route[1] = ITrampoline.Interaction({target: settlement, value: BUY_AMOUNT - 1, callData: ''});
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
@@ -464,12 +465,15 @@ contract TrampolineTest is Test {
   function test_execute_passes_value_in_interactions() public {
     MockWETH weth = new MockWETH();
     // ETH sitting in the instance mid-route (e.g. from an ETH-paying venue);
-    // the signed route wraps it and the sweep returns it as WETH.
+    // the signed route wraps it and delivers the WETH to the settlement.
     vm.deal(address(trampoline), BUY_AMOUNT);
 
-    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](2);
     route[0] = ITrampoline.Interaction({
       target: address(weth), value: BUY_AMOUNT, callData: abi.encodeCall(MockWETH.deposit, ())
+    });
+    route[1] = ITrampoline.Interaction({
+      target: address(weth), value: 0, callData: abi.encodeCall(IERC20.transfer, (settlement, BUY_AMOUNT))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
