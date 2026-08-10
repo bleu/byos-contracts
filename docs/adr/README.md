@@ -24,6 +24,7 @@ live with the BYOS service.
 | [0007](0007-erc20-escrow-token.md) | ERC20 escrow token (transfers, pause, expanded freeze) | accepted |
 | [0008](0008-residue-disposition.md) | Residue disposition: swept to the settlement | accepted; inverted 2026-07-22 (was sub-solver-reclaimable) |
 | [0009](0009-single-order-solutions.md) | Single-order solutions: one order per proposal, per settlement | accepted |
+| [0010](0010-no-onchain-proposal-cancellation.md) | No on-chain proposal cancellation | accepted |
 
 ## Known open questions
 
