@@ -111,18 +111,24 @@ by it), making on-chain verification straightforward. The factory itself is depl
 the Escrow's constructor (avoiding a circular constructor dependency with the submitter
 role check), so a generation is anchored by its Escrow.
 
-### Nonce semantics: unique salt, no enforcement
+### Nonce semantics: on-chain replay protection
 
-The nonce is a unique salt that makes each proposal's EIP-712 hash distinct. No ordering
-or uniqueness enforcement, either on-chain (trampoline) or off-chain (BYOS).
+Each trampoline instance tracks consumed nonces in a `noncesUsed` mapping. When
+`execute` runs, it reverts if the proposal's nonce has already been consumed and marks
+it after signature verification (CEI ordering). This provides two layers of replay
+defense together with the submitter gate:
 
-Fill tracking alone does not prevent replay of `execute`: a settlement need not include
-the order at all, so a third party could re-run a live proposal in a tradeless
-settlement (the COW-1151 attack). Third-party replay is instead blocked by the
-submitter gate above. Replay by BYOS's own submitter remains possible by design — BYOS
-is trusted not to resubmit, `validUntil` bounds the window and is enforced on-chain,
-and a filled order can't be settled again. Keeping the trampoline storage-free (no
-nonce mapping) preserves the immutable, minimal contract design.
+1. **Third-party replay** — blocked by the submitter gate (`tx.origin` must hold
+   `SUBMITTER_ROLE`). A rival solver replaying public calldata fails before the nonce
+   check.
+2. **BYOS-side replay** — blocked by the nonce check. Even an authorized submitter
+   cannot re-execute the same signed proposal (or any proposal reusing a consumed
+   nonce).
+
+It is the sub-solver's responsibility to prepare proposals with nonces that have not
+been consumed on its trampoline instance. Nonces are unordered — any `uint256` value
+is valid as long as it has not been used before. `validUntil` remains enforced as an
+independent expiry guard.
 
 ### Proposal payload shape: raw interactions
 
@@ -147,10 +153,11 @@ reject at gatekeeping, never patch.
 - **`escrow_account` in signed struct (delegated collateral).** Allows signing with one
   key, collateral from another. Rejected for v1 — complicates the escrow contract, and
   signer == escrow key is the cleanest invariant. Delegation is a v2 concern.
-- **Monotonic on-chain nonce (trampoline stores nonce mapping).** Strongest replay
-  protection, but adds storage writes to the trampoline. Rejected — third-party replay
-  is blocked by the submitter gate, BYOS-side replay is bounded by `validUntil` and
-  fill tracking; keeping the trampoline storage-free is more valuable.
+- **Monotonic on-chain nonce (trampoline stores nonce mapping).** Initially rejected in
+  favor of a storage-free trampoline, then adopted (COW-1254): the nonce mapping
+  provides hard replay protection independent of BYOS trust, at the cost of one SSTORE
+  per settlement (~20k gas cold / 5k warm). The submitter gate remains for third-party
+  replay; the nonce check hardens against BYOS-side replay.
 - **Executed-digest mapping instead of submitter gating.** Mark each proposal digest on
   first execution; replays revert. Keyless, but adds an SSTORE per settlement and does
   not stop a rival solver front-running the original settlement from a public mempool —
@@ -197,3 +204,8 @@ reject at gatekeeping, never patch.
   dependency-free: `execute` performs two staticcalls into the Escrow per settlement
   (role id + role check), and a compromised Owner could block settlements by revoking
   all submitters — no worse than the pre-existing Owner trust.
+- **Sub-solvers must use unique nonces.** Each nonce value is consumed on first
+  execution and permanently rejected afterwards. Sub-solvers are responsible for
+  tracking which nonces they have used (or using a scheme like random `uint256` values
+  that is statistically collision-free). Resubmitting a proposal with a consumed nonce
+  reverts at the trampoline.
