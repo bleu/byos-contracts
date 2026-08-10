@@ -22,8 +22,9 @@ be made to grant any approval. The only target it hard-blocks is the vault relay
 `GPv2Interaction.execute`). A
 permissionless sub-solver's code must never run in that context, or it would inherit
 buffer-spend and arbitrary-approve power over a contract shared by every CoW solver.
-The Trampoline re-runs the sub-solver's interactions as itself, in a fund-less context.
-That holds for both topologies, so topology is not what buys buffer safety.
+The Trampoline re-runs the sub-solver's interactions as itself, isolated from settlement
+buffers and approvals. That holds for both topologies, so topology is not what buys
+buffer safety.
 
 ### Why structural isolation rather than a filter
 
@@ -45,23 +46,25 @@ and debit/slash replace circuit-breaker slashing. A recognize-and-block approve 
 cannot carry that boundary, because CoW itself does not filter and "grant an allowance"
 has shapes a filter misses. For example, `Permit2.approve` uses a different target and
 selector yet still grants a drainable allowance on a real token. What a sub-solver
-cannot get around is a contract that holds no funds and where each sub-solver reaches
-only its own instance.
+cannot get around is a contract isolated from settlement buffers, where each sub-solver
+reaches only its own instance.
 
 ### What topology actually governs
 
 Because the Trampoline runs sub-solver-authored `call`s as itself, it grants ERC-20
-approvals to sub-solver-chosen targets and may retain dust. Approvals and dust are
-persistent contract state. An exploit needs both a planted approval and a resting
-balance; an approval over an empty contract drains nothing.
+approvals to sub-solver-chosen targets and may hold balances between settlements.
+Approvals and balances are persistent contract state. An exploit needs both a planted
+approval and a resting balance; per-instance isolation confines both to the same
+sub-solver.
 
-The only value that can ever rest in the Trampoline is a stray token or dust — trade
-tokens are swept back every settlement ([ADR-0008](0008-residue-disposition.md)).
-Users are paid by `GPv2Settlement` at clearing price and the settlement reverts on
-shortfall, so atomicity protects them upstream of any leftovers. Other sub-solvers'
-collateral lives in escrow and never transits the Trampoline. So the worst case of a
-leftover plus a planted approval is BYOS leaking its own surplus, which is an accounting
-concern rather than theft of user or counterparty funds.
+The instance may hold residue between settlements — unconsumed sell tokens, intermediate
+dust — which is the sub-solver's own property, reclaimable via claim functions
+([ADR-0008](0008-residue-disposition.md)). Users are paid by `GPv2Settlement` at clearing
+price and the settlement reverts on shortfall, so atomicity protects them upstream of any
+residue. Other sub-solvers' collateral lives in escrow and never transits the Trampoline.
+The worst case of residue plus a planted approval is a sub-solver draining its own
+reclaimable property through its own route-planted approvals — self-harm, not theft of
+user, counterparty, or cross-sub-solver funds.
 
 ## Decision
 
@@ -75,31 +78,28 @@ escrow-deposit time, paid by the sub-solver) is settled in
 
 ### Allowance hygiene and desired execution
 
-> The sweep post-condition below was briefly superseded by sub-solver-reclaimable
-> residue and restored on 2026-07-22 in floor-plus-delta-check form: `execute` sweeps
-> both trade tokens to `GPv2Settlement` and asserts the settlement's buy-token delta
-> covers `buyAmount`; stray tokens are written off
-> ([ADR-0008](0008-residue-disposition.md)).
-
-The leak-prevention control is the sweep, and it is required regardless of topology:
+The containment control is per-instance isolation, combined with the balance-delta check
+that enforces the buy-token floor ([ADR-0008](0008-residue-disposition.md)):
 
 1. `GPv2Settlement` transfers exactly `sellAmount` of `sellToken` into the instance.
 2. The instance runs the sub-solver interactions (approve a router, swap, produce `buyToken`).
-3. The instance returns `buyAmount` of `buyToken` to `GPv2Settlement`.
-4. Post-condition: the instance ends holding zero of the trade tokens. Sweep any
-   remainder (BYOS's positive slippage) back to `GPv2Settlement`, where slippage belongs
-   anyway, or revert the settlement.
+3. The instance returns at least `buyAmount` of `buyToken` to `GPv2Settlement`, enforced by
+   the balance-delta check. Over-delivery above the floor lands in the settlement as
+   BYOS-owned slippage.
+4. Tokens remaining on the instance (unconsumed sell tokens, intermediate dust) are the
+   sub-solver's property, reclaimable via `claimToken`/`claimTokens`
+   ([ADR-0008](0008-residue-disposition.md)).
 
-Approvals are not reset to zero. The invariant we enforce is zero balance at rest rather
-than zero approvals, because approvals are per-`(token, spender)` over an unbounded,
-sub-solver-authored set and cannot be generically enumerated to reset, whereas balance
-is directly assertable. With the instance fund-less at rest and isolated per sub-solver,
-a standing or even over-broad approval drains nothing belonging to the protocol or
-another sub-solver. BYOS-encoded approvals to known routers may be left standing and
-reused across that sub-solver's future settlements, a gas saving the shared design
-cannot safely take. Failed settlements revert atomically, including on-chain reverts,
-rolling back any approval set in the attempt, so no dangling-approval cleanup is
-required.
+Approvals are not reset to zero. The invariant we enforce is per-instance isolation
+rather than zero approvals, because approvals are per-`(token, spender)` over an
+unbounded, sub-solver-authored set and cannot be generically enumerated to reset, whereas
+per-instance isolation is a free property of EVM storage isolation. With the instance
+isolated per sub-solver, a standing or even over-broad approval can only interact with
+that sub-solver's own residue — it drains nothing belonging to the protocol or another
+sub-solver. BYOS-encoded approvals to known routers may be left standing and reused
+across that sub-solver's future settlements, a gas saving the shared design cannot
+safely take. Failed settlements revert atomically, including on-chain reverts, rolling
+back any approval set in the attempt, so no dangling-approval cleanup is required.
 
 Defense in depth pairs this containment with a cheap preventive layer. BYOS authors the
 approvals itself: exact `sellAmount`, route-derived, granted only to the venues the
@@ -110,17 +110,17 @@ rejects obvious sub-solver-authored `approve`-like calls. This kills the common
 planted-approval case at the source and reduces reliance on isolation without replacing
 it: "approve-like" is not one selector (`approve`, `increaseAllowance`, EIP-2612 / DAI
 `permit`, Permit2, ERC-777 operator grants, and others), and filtering all variants on
-arbitrary calldata is the same un-enumerable problem the sweep avoids. Fully forbidding
-sub-solver-authored approvals would require structured routes instead of raw
-`interactions`, sacrificing permissionless any-DEX generality, so the preventive layer
-stays best-effort and per-instance isolation plus the sweep remains the backstop.
+arbitrary calldata is the same un-enumerable problem per-instance isolation avoids.
+Fully forbidding sub-solver-authored approvals would require structured routes instead
+of raw `interactions`, sacrificing permissionless any-DEX generality, so the preventive
+layer stays best-effort and per-instance isolation remains the backstop.
 
 ### Native ETH wrap/unwrap
 
 The instance performs any required WETH wrap/unwrap internally, within the single
-settlement. Native ETH falls under the same empty-at-rest post-condition: any ETH
-balance remaining after execution is swept back to `GPv2Settlement`, or the settlement
-reverts. No ETH is held by an instance between settlements.
+settlement. Native ETH remaining on the instance after execution is reclaimable by the
+sub-solver via claim functions using the `BUY_ETH_ADDRESS` sentinel
+([ADR-0008](0008-residue-disposition.md)).
 
 ## Alternatives considered
 
@@ -140,11 +140,11 @@ must be complete for every exotic token (fee-on-transfer, rebasing, non-standard
 `approve`) now and forever, and one miss is a cross-sub-solver hole. Per-instance
 containment is a free property of EVM storage isolation.
 
-A shared contract pools risk. The residual the sweep cannot guarantee (where simulation
-and on-chain execution diverge: a different block, MEV, a state-dependent route) collects
-across all sub-solvers and is drainable by any one bad actor, including slippage that
-honest sub-solvers' trades produced. Per-instance confines that residual to its
-originating sub-solver, where draining one's own stranded slippage gains nothing.
+A shared contract pools risk. The residual that simulation-versus-execution divergence
+produces (a different block, MEV, a state-dependent route) collects across all
+sub-solvers and is drainable by any one bad actor, including slippage that honest
+sub-solvers' trades produced. Per-instance confines that residual to its originating
+sub-solver, where draining one's own residue gains nothing.
 
 The hooks-trampoline precedent (`cowprotocol/hooks-trampoline`) is the only safe form of
 a shared executor, and it is safe because it never custodies funds or grants approvals;
@@ -152,8 +152,7 @@ hooks act through the user's own approvals. A BYOS swap requires the executor to
 `sellAmount` and approve a router, so that precedent argues against a shared
 swap-executor.
 
-Per-instance is not itself the leftover fix; the sweep is, in both designs. Per-instance
-earns its keep on three separate things: confining the un-sweepable residual to its
+Per-instance isolation earns its keep on three separate things: confining residue to its
 originating sub-solver, safe approval reuse for gas, and on-chain attribution.
 
 ## Consequences
@@ -171,9 +170,7 @@ originating sub-solver, safe approval reuse for gas, and on-chain attribution.
 - The isolation claim this ADR rests on — a route reaches only its own instance's
   balance, never settlement buffers, user funds, escrow collateral, or another instance —
   is proven adversarially against the real `GPv2Settlement` in
-  [docs/security/trampoline-settlement-isolation.md](../security/trampoline-settlement-isolation.md)
-  (written against the pre-2026-07-22 residue model; the isolation boundary it proves
-  is unchanged by the sweep).
+  [docs/security/trampoline-settlement-isolation.md](../security/trampoline-settlement-isolation.md).
 
 ### Flagged downstream decisions (coupled, not settled here)
 
@@ -196,7 +193,8 @@ The original flags are preserved below.
   preserves any-DEX generality but makes the preventive approve-filter best-effort; a
   structured route (venues plus amounts, BYOS encodes every call) would let BYOS author
   all approvals and forbid sub-solver-authored ones outright, at the cost of generality.
-  Settled with the proposal-API ADR; the topology and sweep backstop hold either way.
+  Settled with the proposal-API ADR; the topology and per-instance isolation hold either
+  way.
 - Upgrade-key posture: immutable clones versus a cow-shed-style per-instance or beacon
   upgrade. Immutable clones carry no admin key, but a bug means deploying a new
   generation, with counterfactual migration and rotated attribution addresses. A beacon
