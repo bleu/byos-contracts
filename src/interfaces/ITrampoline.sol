@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @dev Marker address GPv2 uses for orders buying native ETH (GPv2Order.BUY_ETH_ADDRESS).
- * The sweep and the balance-delta check run in native ETH instead of ERC-20.
+ * The balance-delta check and claim functions handle native ETH instead of ERC-20.
  */
 address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
@@ -21,12 +21,12 @@ bytes32 constant PROPOSAL_TYPEHASH = keccak256(
  * @title BYOS Trampoline
  * @author CoW Protocol Developers
  * @notice Per-sub-solver execution sandbox. Receives the trade's sell tokens from
- * GPv2Settlement, runs the sub-solver's EIP-712-signed route in a fund-less context,
- * sweeps its full remaining balance of the sell token back to the settlement
- * contract, and enforces the signed buy amount as a floor on the settlement's
- * buy-token balance growth. Routes are expected to deliver buy-token output directly
- * to the settlement. One immutable instance per sub-solver at a deterministic
- * CREATE2 address (ADR-0001).
+ * GPv2Settlement, runs the sub-solver's EIP-712-signed route, and enforces the
+ * signed buy amount as a floor on the settlement's buy-token balance growth. Routes
+ * are expected to deliver buy-token output directly to the settlement. Tokens
+ * remaining on the instance after execution (unconsumed sell tokens, intermediate
+ * dust) are reclaimable by the sub-solver via `claimToken`/`claimTokens`. One
+ * immutable instance per sub-solver at a deterministic CREATE2 address (ADR-0001).
  */
 interface ITrampoline {
   /*///////////////////////////////////////////////////////////////
@@ -41,6 +41,14 @@ interface ITrampoline {
    * @param _floor The signed buyAmount the delta was checked against
    */
   event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor);
+
+  /**
+   * @notice The sub-solver has claimed residue from its instance (ADR-0008)
+   * @param _token The claimed token (BUY_ETH_ADDRESS for native ETH)
+   * @param _amount The full balance transferred out
+   * @param _recipient The address that received the claimed balance
+   */
+  event ResidueClaimed(address indexed _token, uint256 _amount, address indexed _recipient);
 
   /*///////////////////////////////////////////////////////////////
                               STRUCTS
@@ -110,9 +118,14 @@ interface ITrampoline {
   error Trampoline_FloorNotMet(uint256 _delta, uint256 _floor);
 
   /**
-   * @notice Throws if the native ETH sweep to the settlement fails
+   * @notice Throws if claim was called by someone else than the sub-solver
    */
-  error Trampoline_EthSettleBackFailed();
+  error Trampoline_OnlySubSolver();
+
+  /**
+   * @notice Throws if the native ETH claim transfer fails
+   */
+  error Trampoline_EthClaimFailed();
 
   /*///////////////////////////////////////////////////////////////
                              VARIABLES
@@ -152,24 +165,23 @@ interface ITrampoline {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Executes a sub-solver's signed route, sweeps the instance's full
-   * remaining balance of the sell token to the settlement contract, and reverts
-   * unless the settlement's buy-token balance grew by at least `_proposal.buyAmount`
+   * @notice Executes a sub-solver's signed route and reverts unless the settlement's
+   * buy-token balance grew by at least `_proposal.buyAmount`
    * @dev Callable only by the settlement contract, and only in a settlement submitted
    * by a BYOS submitter: tx.origin must hold the Escrow's SUBMITTER_ROLE, since a live
    * proposal's calldata is public and any allow-listed solver could otherwise replay it
    * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): buyAmount is
    * the floor the sub-solver signed, measured as the growth of the settlement's
    * buy-token balance between entry and return. Routes are expected to deliver
-   * buy-token output directly to the settlement; the instance does not sweep it.
-   * Anything above the floor lands in the settlement as BYOS-owned slippage
-   * (ADR-0008). The tokens are BYOS-supplied call parameters taken from the order,
-   * not signed proposal fields. When `_buyToken` is BUY_ETH_ADDRESS the snapshot and
-   * delta are in native ETH. Zero sell-token balances are not swept (some tokens
-   * revert on zero-value transfers).
+   * buy-token output directly to the settlement. Anything above the floor lands in
+   * the settlement as BYOS-owned slippage (ADR-0008). Tokens remaining on the
+   * instance after execution (unconsumed sell tokens, intermediate dust) are
+   * reclaimable by the sub-solver via `claimToken`/`claimTokens`. The tokens are
+   * BYOS-supplied call parameters taken from the order, not signed proposal fields.
+   * When `_buyToken` is BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
-   * @param _sellToken The trade's sell token, swept back to the settlement
+   * @param _sellToken The trade's sell token (unused in execute, retained for interface compatibility)
    * @param _buyToken The trade's buy token; BUY_ETH_ADDRESS for native ETH
    * @param _signature Sub-solver's EIP-712 signature over the proposal
    */
@@ -179,5 +191,30 @@ interface ITrampoline {
     address _sellToken,
     address _buyToken,
     bytes calldata _signature
+  ) external;
+
+  /**
+   * @notice Transfers the instance's full balance of `_token` to `_recipient`
+   * @dev Residue is the sub-solver's property (ADR-0008). The instance is storage-free
+   * and cannot enumerate what it holds; the caller identifies tokens off-chain. Use
+   * BUY_ETH_ADDRESS to claim native ETH. Residue is at risk to allow-listed-solver
+   * replay while any signed proposal for this instance is unexpired — claim promptly.
+   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balance
+   */
+  function claimToken(
+    address _token,
+    address _recipient
+  ) external;
+
+  /**
+   * @notice Transfers the instance's full balance of each listed token to `_recipient`
+   * @dev Batch form of claimToken; same semantics per token
+   * @param _tokens The tokens to claim; full balance each, BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balances
+   */
+  function claimTokens(
+    address[] calldata _tokens,
+    address _recipient
   ) external;
 }
