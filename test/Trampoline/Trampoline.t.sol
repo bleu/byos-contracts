@@ -10,6 +10,8 @@ import {Escrow} from 'contracts/Escrow.sol';
 import {Trampoline} from 'contracts/Trampoline.sol';
 import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
+import {CallbackERC20} from '../mocks/CallbackERC20.sol';
+import {FeeOnTransferERC20} from '../mocks/FeeOnTransferERC20.sol';
 import {MockRouter} from '../mocks/MockRouter.sol';
 import {MockWETH} from '../mocks/MockWETH.sol';
 import {Reverter} from '../mocks/Reverter.sol';
@@ -610,5 +612,289 @@ contract TrampolineTest is Test {
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
     instance2.execute(proposal, route, address(sellToken), address(buyToken), signature);
+  }
+
+  // --- Threat analysis coverage (docs/security/threat-analysis.md) ---
+
+  function test_execute_with_zero_buyAmount_accepts_any_output() public {
+    // Gap G1: no on-chain buyAmount > 0 check. When buyAmount is 0, the floor
+    // is trivially met by any output (including 0), so a malicious sub-solver
+    // can sign a proposal that captures sell tokens without delivering anything.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+
+    address sink = makeAddr('sink');
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    route[0] = ITrampoline.Interaction({
+      target: address(sellToken), value: 0, callData: abi.encodeCall(IERC20.transfer, (sink, SELL_AMOUNT))
+    });
+
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyAmount = 0;
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
+
+    assertEq(buyToken.balanceOf(settlement), 0);
+    assertEq(sellToken.balanceOf(sink), SELL_AMOUNT);
+    assertEq(sellToken.balanceOf(address(trampoline)), 0);
+  }
+
+  function test_address_zero_trampoline_rejects_garbage_signature() public {
+    // Gap G2: address(0) trampoline attack surface.
+    // ensureDeployed(address(0)) succeeds (no guard in the factory), but
+    // ecrecover with invalid inputs returns empty data rather than address(0),
+    // leaving the digest in the output slot. _recovered != SUB_SOLVER holds,
+    // so the attack does not work with this implementation.
+    Trampoline zeroTrampoline = Trampoline(payable(factory.ensureDeployed(address(0))));
+    assertEq(zeroTrampoline.SUB_SOLVER(), address(0));
+
+    sellToken.mint(address(zeroTrampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+
+    // 65 zero bytes: v=0, r=0, s=0 — invalid for ecrecover.
+    bytes memory garbage = new bytes(65);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    zeroTrampoline.execute(proposal, route, address(sellToken), address(buyToken), garbage);
+  }
+
+  function test_execute_does_not_enforce_signed_sellAmount() public {
+    // Gap G3 (sub-case A): sellAmount is signed but not enforced on-chain.
+    // Less than sellAmount on the trampoline, but the route works with the
+    // available amount — trampoline succeeds regardless, proving sellAmount
+    // is never checked.
+    uint256 actualDeposit = SELL_AMOUNT / 2;
+    sellToken.mint(address(trampoline), actualDeposit);
+
+    ITrampoline.Interaction[] memory route = _swapRoute(actualDeposit, BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal(); // signs SELL_AMOUNT = 100 ether
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
+  function test_execute_without_sell_tokens_reverts_in_route() public {
+    // Gap G3 (sub-case B): when BYOS sends NO sell tokens (compromised
+    // submitter omits the transfer-in interaction), the route tries to pull
+    // tokens that don't exist and reverts — the sub-solver gets Track-A
+    // debited for a fault BYOS caused. The trampoline provides no guard.
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert();
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
+  }
+
+  function test_wrong_sellToken_strands_real_sell_tokens_on_trampoline() public {
+    // Threat 9: _sellToken is unsigned — BYOS supplies it. If BYOS passes a
+    // different _sellToken, the sweep targets the wrong token and the actual
+    // sell tokens remain stranded on the trampoline.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    route[0] = ITrampoline.Interaction({
+      target: address(buyToken), value: 0, callData: abi.encodeCall(TestERC20.mint, (settlement, BUY_AMOUNT))
+    });
+
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    TestERC20 wrongToken = new TestERC20();
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(wrongToken), address(buyToken), signature);
+
+    assertEq(sellToken.balanceOf(address(trampoline)), SELL_AMOUNT);
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
+  function test_wrong_buyToken_causes_delta_check_revert() public {
+    // Threat 9: _buyToken is unsigned — BYOS supplies it. If BYOS passes a
+    // different _buyToken, the delta check measures the wrong token's balance
+    // growth. Since the route doesn't produce the wrong token, the delta is 0.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    TestERC20 wrongBuyToken = new TestERC20();
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, 0, BUY_AMOUNT));
+    trampoline.execute(proposal, route, address(sellToken), address(wrongBuyToken), signature);
+  }
+
+  function test_fee_on_transfer_buyToken_delta_accounts_for_fee() public {
+    // Threat 7: fee-on-transfer buy token. The delta check measures actual
+    // balanceOf difference, correctly accounting for the transfer fee.
+    FeeOnTransferERC20 feeToken = new FeeOnTransferERC20();
+    feeToken.mint(address(router), 1_000_000 ether);
+
+    uint256 routeOutput = 100 ether;
+    uint256 netReceived = routeOutput - routeOutput * 100 / 10_000; // 99 ether after 1% fee
+
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](2);
+    route[0] = ITrampoline.Interaction({
+      target: address(sellToken), value: 0, callData: abi.encodeCall(IERC20.approve, (address(router), SELL_AMOUNT))
+    });
+    route[1] = ITrampoline.Interaction({
+      target: address(router),
+      value: 0,
+      callData: abi.encodeCall(
+        MockRouter.swap, (IERC20(address(sellToken)), IERC20(address(feeToken)), SELL_AMOUNT, routeOutput, settlement)
+      )
+    });
+
+    // buyAmount <= netReceived → succeeds
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyAmount = netReceived;
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(feeToken), signature);
+    assertEq(feeToken.balanceOf(settlement), netReceived);
+
+    // buyAmount == routeOutput (> netReceived) → reverts
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Proposal memory proposal2 = _proposal();
+    proposal2.buyAmount = routeOutput;
+    proposal2.nonce = 1;
+    bytes memory sig2 = _sign(subSolverKey, proposal2, route);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, netReceived, routeOutput));
+    trampoline.execute(proposal2, route, address(sellToken), address(feeToken), sig2);
+  }
+
+  function test_reentrant_sell_token_sweep_cannot_reenter_execute() public {
+    // Threat 7: ERC-777-style transfer hook on the sell token. During the
+    // sweep, the token's transfer callback tries to re-enter execute. The
+    // callback fails because msg.sender is the token contract, not SETTLEMENT.
+    CallbackERC20 reentrantSell = new CallbackERC20();
+    reentrantSell.mint(address(trampoline), SELL_AMOUNT);
+
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
+    route[0] = ITrampoline.Interaction({
+      target: address(buyToken), value: 0, callData: abi.encodeCall(TestERC20.mint, (settlement, BUY_AMOUNT))
+    });
+
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    // Arm: during the sweep (reentrantSell.transfer from trampoline to settlement),
+    // the token tries to re-enter trampoline.execute.
+    reentrantSell.arm(
+      address(trampoline),
+      abi.encodeCall(
+        ITrampoline.execute,
+        (proposal, new ITrampoline.Interaction[](0), address(reentrantSell), address(buyToken), signature)
+      )
+    );
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(reentrantSell), address(buyToken), signature);
+
+    // The reentrant callback was swallowed (msg.sender != SETTLEMENT); outer execution completed.
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+    assertEq(reentrantSell.balanceOf(settlement), SELL_AMOUNT);
+    assertEq(reentrantSell.balanceOf(address(trampoline)), 0);
+  }
+
+  function test_route_calling_escrow_deposit_reverts_atomically() public {
+    // Threat 1.3.6: route interaction calls escrow.deposit with the trampoline's
+    // ETH. The deposit succeeds mid-route but the trampoline can no longer deliver
+    // the buy amount, so the delta check fails and the entire tx reverts atomically
+    // — the deposit is rolled back.
+    MockWETH weth = new MockWETH();
+    vm.deal(address(this), BUY_AMOUNT);
+    weth.deposit{value: BUY_AMOUNT}();
+    assertTrue(weth.transfer(address(trampoline), BUY_AMOUNT));
+
+    address attackerAddr = makeAddr('escrowAttacker');
+
+    ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](2);
+    route[0] = ITrampoline.Interaction({
+      target: address(weth), value: 0, callData: abi.encodeCall(MockWETH.withdraw, (BUY_AMOUNT))
+    });
+    route[1] = ITrampoline.Interaction({
+      target: address(escrow), value: BUY_AMOUNT, callData: abi.encodeWithSignature('deposit(address)', attackerAddr)
+    });
+
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, 0, BUY_AMOUNT));
+    trampoline.execute(proposal, route, address(sellToken), BUY_ETH_ADDRESS, signature);
+
+    // Atomic revert: escrow deposit was rolled back
+    assertEq(escrow.balanceOf(attackerAddr), 0);
+  }
+
+  function test_malleable_signature_recovers_same_signer() public {
+    // Threat 1.4: signature malleability. The trampoline uses raw ecrecover
+    // (no high-s check), so both (v, r, s) and (v', r, n-s) recover to the
+    // same address. The nonce field makes this harmless — malleable variants
+    // of the same proposal are functionally identical replays.
+    uint256 secp256k1n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+
+    bytes32 digest = ProposalSigning.digest(factory.domainSeparator(), proposal, route);
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(subSolverKey, digest);
+
+    // Original signature
+    bytes memory originalSig = abi.encodePacked(r, s, v);
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), originalSig);
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+
+    // Malleable counterpart
+    uint8 v2 = v == 27 ? 28 : 27;
+    bytes32 s2 = bytes32(secp256k1n - uint256(s));
+    bytes memory malleableSig = abi.encodePacked(r, s2, v2);
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), malleableSig);
+    assertEq(buyToken.balanceOf(settlement), 2 * BUY_AMOUNT);
+  }
+
+  function test_double_execute_sequential_has_independent_deltas() public {
+    // Gap G6: one-execute-per-settlement is an off-chain invariant, not enforced
+    // on-chain. Sequential executes have independent delta checks: each snapshots
+    // balanceOf at its own entry, so the first delivery does not inflate the
+    // second's delta.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route1 = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal1 = _proposal();
+    proposal1.nonce = 1;
+    bytes memory sig1 = _sign(subSolverKey, proposal1, route1);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal1, route1, address(sellToken), address(buyToken), sig1);
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+
+    // Second execute — delta check starts from the new baseline
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route2 = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal2 = _proposal();
+    proposal2.nonce = 2;
+    bytes memory sig2 = _sign(subSolverKey, proposal2, route2);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal2, route2, address(sellToken), address(buyToken), sig2);
+    assertEq(buyToken.balanceOf(settlement), 2 * BUY_AMOUNT);
   }
 }

@@ -174,6 +174,37 @@ contract SubSolverActionsTest is EscrowTestBase {
     assertEq(subSolver.balance, 5 ether);
   }
 
+  // --- Threat analysis coverage ---
+
+  function test_cooldown_increase_retroactively_extends_pending_withdrawal() public {
+    // Gap G5: admin changes cooldown while a withdrawal is pending. An increase
+    // retroactively extends the wait, blocking a previously-executable withdrawal.
+    escrow.deposit{value: 5 ether}(subSolver);
+    uint256 requestTime = block.timestamp;
+
+    vm.prank(subSolver);
+    escrow.requestWithdrawal();
+
+    // Warp past the original 1-day cooldown
+    vm.warp(requestTime + COOLDOWN + 30 minutes);
+
+    // Admin increases cooldown to 2 days
+    vm.prank(admin);
+    escrow.setCooldownPeriod(2 days);
+
+    // Previously executable withdrawal is now blocked
+    vm.prank(subSolver);
+    vm.expectRevert(IEscrow.Escrow_CooldownNotElapsed.selector);
+    escrow.executeWithdrawal();
+
+    // Warp to the new cooldown expiry
+    vm.warp(requestTime + 2 days);
+
+    vm.prank(subSolver);
+    escrow.executeWithdrawal();
+    assertEq(subSolver.balance, 5 ether);
+  }
+
   // --- Reentrancy ---
 
   function test_execute_withdrawal_is_reentrancy_safe() public {
