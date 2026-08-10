@@ -826,9 +826,7 @@ contract TrampolineTest is Test {
       target: address(weth), value: 0, callData: abi.encodeCall(MockWETH.withdraw, (BUY_AMOUNT))
     });
     route[1] = ITrampoline.Interaction({
-      target: address(escrow),
-      value: BUY_AMOUNT,
-      callData: abi.encodeWithSignature('deposit(address)', attackerAddr)
+      target: address(escrow), value: BUY_AMOUNT, callData: abi.encodeWithSignature('deposit(address)', attackerAddr)
     });
 
     ITrampoline.Proposal memory proposal = _proposal();

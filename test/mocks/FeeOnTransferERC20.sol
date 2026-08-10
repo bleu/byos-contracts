@@ -10,11 +10,18 @@ contract FeeOnTransferERC20 is ERC20 {
 
   constructor() ERC20('Fee Token', 'FEE') {}
 
-  function mint(address to, uint256 amount) external {
+  function mint(
+    address to,
+    uint256 amount
+  ) external {
     _mint(to, amount);
   }
 
-  function _update(address from, address to, uint256 amount) internal override {
+  function _update(
+    address from,
+    address to,
+    uint256 amount
+  ) internal override {
     if (from != address(0) && to != address(0)) {
       uint256 fee = amount * FEE_BPS / 10_000;
       super._update(from, to, amount - fee);

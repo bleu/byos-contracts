@@ -12,19 +12,29 @@ contract CallbackERC20 is ERC20 {
 
   constructor() ERC20('Callback Token', 'CB') {}
 
-  function mint(address to, uint256 amount) external {
+  function mint(
+    address to,
+    uint256 amount
+  ) external {
     _mint(to, amount);
   }
 
   /// @dev Arm the callback. The next non-mint, non-burn transfer will call
   /// `target` with `data`. The callback fires once then disarms.
-  function arm(address target, bytes calldata data) external {
+  function arm(
+    address target,
+    bytes calldata data
+  ) external {
     callbackTarget = target;
     callbackData = data;
     armed = true;
   }
 
-  function _update(address from, address to, uint256 amount) internal override {
+  function _update(
+    address from,
+    address to,
+    uint256 amount
+  ) internal override {
     super._update(from, to, amount);
     if (armed && from != address(0) && to != address(0)) {
       armed = false;

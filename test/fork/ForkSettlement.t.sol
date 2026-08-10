@@ -358,5 +358,4 @@ contract ForkSettlementTest is Test {
     assertEq(address(trampoline).balance, 0);
     assertEq(USDC.balanceOf(address(trampoline)), 0);
   }
-
 }
