@@ -25,6 +25,9 @@ contract Trampoline is ITrampoline {
   /// @inheritdoc ITrampoline
   address public immutable ESCROW;
 
+  /// @inheritdoc ITrampoline
+  mapping(uint256 => bool) public noncesUsed;
+
   /**
    * @notice Wires the instance to its sub-solver, the settlement contract, the
    * factory's EIP-712 domain, and the Escrow acting as submitter registry
@@ -67,8 +70,11 @@ contract Trampoline is ITrampoline {
       revert Trampoline_UnauthorizedSubmitter();
     }
     if (block.timestamp > _proposal.validUntil) revert Trampoline_ProposalExpired();
+    if (noncesUsed[_proposal.nonce]) revert Trampoline_NonceAlreadyUsed();
 
     _verifySignature(_proposal, _interactions, _signature);
+
+    noncesUsed[_proposal.nonce] = true;
 
     uint256 _buyBalanceBefore = _settlementBuyTokenBalance(_buyToken);
 

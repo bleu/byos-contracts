@@ -217,12 +217,14 @@ contract TrampolineTest is Test {
     Trampoline instance = Trampoline(payable(factory7702.ensureDeployed(subSolver)));
 
     ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
-    ITrampoline.Proposal memory proposal = _proposal();
-    bytes32 digest = ProposalSigning.digest(factory7702.domainSeparator(), proposal, route);
-    (uint8 v, bytes32 r, bytes32 s) = vm.sign(subSolverKey, digest);
-    bytes memory signature = abi.encodePacked(r, s, v);
 
     for (uint256 i = 0; i < submitters.length; ++i) {
+      ITrampoline.Proposal memory proposal = _proposal();
+      proposal.nonce = i;
+      bytes32 digest = ProposalSigning.digest(factory7702.domainSeparator(), proposal, route);
+      (uint8 v, bytes32 r, bytes32 s) = vm.sign(subSolverKey, digest);
+      bytes memory signature = abi.encodePacked(r, s, v);
+
       sellToken.mint(address(instance), SELL_AMOUNT);
       vm.prank(settlement, submitters[i]);
       instance.execute(proposal, route, address(sellToken), address(buyToken), signature);
@@ -442,22 +444,23 @@ contract TrampolineTest is Test {
 
   // --- Replay ---
 
-  function test_execute_accepts_replayed_proposal_by_design() public {
-    // The trampoline is deliberately stateless (no nonce mapping, ADR-0005): a live
-    // proposal replayed by an authorized BYOS submitter executes again. Third-party
-    // replay is blocked by the submitter gate; BYOS itself is trusted not to
-    // resubmit, and validUntil bounds the window. This test pins that behavior.
+  function test_execute_reverts_on_replayed_nonce() public {
+    // On-chain nonce tracking: once a nonce is consumed, replaying the same
+    // proposal (or any proposal reusing that nonce) reverts.
     ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    for (uint256 i = 0; i < 2; i++) {
-      sellToken.mint(address(trampoline), SELL_AMOUNT);
-      vm.prank(settlement, submitter);
-      trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
-    }
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+    assertTrue(trampoline.noncesUsed(proposal.nonce));
 
-    assertEq(buyToken.balanceOf(settlement), 2 * BUY_AMOUNT);
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
   }
 
   // --- Isolation between instances ---
@@ -871,11 +874,11 @@ contract TrampolineTest is Test {
     assertEq(escrow.balanceOf(attackerAddr), 0);
   }
 
-  function test_malleable_signature_recovers_same_signer() public {
+  function test_malleable_signature_blocked_by_nonce_replay() public {
     // Threat 1.4: signature malleability. The trampoline uses raw ecrecover
     // (no high-s check), so both (v, r, s) and (v', r, n-s) recover to the
-    // same address. The nonce field makes this harmless — malleable variants
-    // of the same proposal are functionally identical replays.
+    // same address. On-chain nonce tracking makes malleability harmless: the
+    // second execution reverts regardless of which signature variant is used.
     uint256 secp256k1n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
 
     sellToken.mint(address(trampoline), SELL_AMOUNT);
@@ -891,15 +894,15 @@ contract TrampolineTest is Test {
     trampoline.execute(proposal, route, address(sellToken), address(buyToken), originalSig);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
 
-    // Malleable counterpart
+    // Malleable counterpart — blocked by nonce replay, not signature failure
     uint8 v2 = v == 27 ? 28 : 27;
     bytes32 s2 = bytes32(secp256k1n - uint256(s));
     bytes memory malleableSig = abi.encodePacked(r, s2, v2);
 
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
     trampoline.execute(proposal, route, address(sellToken), address(buyToken), malleableSig);
-    assertEq(buyToken.balanceOf(settlement), 2 * BUY_AMOUNT);
   }
 
   function test_double_execute_sequential_has_independent_deltas() public {

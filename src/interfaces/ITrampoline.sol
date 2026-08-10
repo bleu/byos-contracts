@@ -105,6 +105,11 @@ interface ITrampoline {
   error Trampoline_ProposalExpired();
 
   /**
+   * @notice Throws if the proposal's nonce has already been used
+   */
+  error Trampoline_NonceAlreadyUsed();
+
+  /**
    * @notice Throws if the proposal signature does not recover to the sub-solver
    */
   error Trampoline_InvalidSignature();
@@ -159,6 +164,15 @@ interface ITrampoline {
    */
   // solhint-disable-next-line func-name-mixedcase
   function ESCROW() external view returns (address _escrow);
+
+  /**
+   * @notice Returns whether a nonce has already been consumed by a prior execution
+   * @param _nonce The nonce value to check
+   * @return _used True if the nonce has been consumed
+   */
+  function noncesUsed(
+    uint256 _nonce
+  ) external view returns (bool _used);
 
   /*///////////////////////////////////////////////////////////////
                                LOGIC
