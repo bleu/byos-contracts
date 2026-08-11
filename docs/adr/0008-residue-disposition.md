@@ -1,49 +1,40 @@
-# Residue disposition: swept to the settlement
+# Residue disposition: sub-solver reclaimable
 
-Status: accepted; decision inverted 2026-07-22
-
-> Previously residue was sub-solver property, reclaimable via `claimToken`/`claimTokens`
-> on the instance; inverted after the CoW fee-mechanics review showed that surplus
-> parked in the settlement contract returns to the solver through CoW's weekly
-> accounting ([docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md)).
+Status: accepted
 
 ## Context
 
-[ADR-0003](0003-trampoline-deployment-settlement-integration.md) fixes the settlement
-value flow. Its original form settled back exactly `buyAmount` and left whatever the
-route produced beyond it in the sub-solver's Trampoline instance — **residue**: route
-surplus beyond the quote, unconsumed `sellToken` (buy orders over-provision their
-input), intermediate-token dust, stray native ETH. The first version of this ADR made
-that residue sub-solver property behind claim functions, on three grounds: sweeping it
-to the settlement would confiscate the sub-solver's alpha and push its capture in-route
-via approval helpers (the pattern ADR-0001's filter rejects); a live replay exposure
-(COW-1151) made parked residue unsafe anyway; and a BYOS key over the instance would
-break the no-privileged-key posture that ADR-0005's trust argument rests on.
+After `execute` completes, tokens can remain on the instance: unconsumed sell tokens
+(buy orders over-provision their input), intermediate-token dust, route surplus the
+sub-solver did not capture in-route. This ADR settles who owns that residue and how it
+is recovered.
 
-Three findings changed those premises (CoW solvers-team meeting and fee-mechanics
-review, 2026-07-22):
+Two sub-solver personas drive the decision:
 
-- Fees and slippage are price wedges: whatever `GPv2Settlement` pulls in and does not
-  pay out is credited to the solver — after protocol and partner fees — and returned
-  weekly in native token. Surplus parked in the settlement is not lost to BYOS; it is
-  the normal way solvers collect.
-- The sub-solver persona is a DEX or routing API compensated by its own venue fees
-  inside the route, not by leftovers. The floor is the bid: everything above it was
-  never promised to anyone, and in-route capture of it is bid-neutral — it takes only
-  what the sub-solver could have kept by signing a higher floor.
-- The replay exposure was closed by the submitter gate (#11), so nothing about parked
-  balances is urgent anymore.
+- **DEX / routing-API sub-solvers** are compensated by their own venue fees inside the
+  route. Residue is incidental surplus they never counted on.
+- **Private Market Makers** provide their own liquidity and need tight control over
+  capital flows. Unconsumed sell tokens and intermediate residue are working capital the
+  MM must recover promptly.
+
+CoW's fee mechanics make a sweep to settlement viable for the first persona: surplus
+parked in `GPv2Settlement` is credited to the solver — after protocol and partner fees —
+and returned weekly in native token
+([docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md)). But weekly
+accounting introduces unacceptable capital-recovery latency for the Private MM persona,
+where capital velocity is the core requirement. Because the Trampoline must serve both
+personas with a single contract, the residue model must accommodate the stricter
+requirement.
 
 ## Decision
 
-There is no residue. Routes deliver buy-token output directly to `GPv2Settlement`.
-`execute` sweeps the instance's remaining sell-token balance to `GPv2Settlement` and
-enforces `buyAmount` as a floor via the balance-delta check
-([ADR-0003](0003-trampoline-deployment-settlement-integration.md)): the instance ends
-every settlement holding none of the trade tokens. Over-delivery and unconsumed sell
-tokens are BYOS-owned settlement slippage, returned weekly by CoW's accounting. The
-claim functions are removed; the trampoline keeps zero privileged keys — with nothing
-resting in the instance, nobody needs one.
+Residue is the sub-solver's property. `claimToken`/`claimTokens` transfer the instance's
+full balance of the requested token(s) to a caller-chosen recipient, gated by
+`msg.sender == SUB_SOLVER`. There is no sweep from `execute`: routes deliver buy-token
+output directly to `GPv2Settlement`, and `execute` enforces `buyAmount` as a floor via
+the balance-delta check
+([ADR-0003](0003-trampoline-deployment-settlement-integration.md)). Tokens remaining on
+the instance after execution stay there until claimed.
 
 ### Strays are written off
 
@@ -57,42 +48,48 @@ off-chain (gatekeeping, eviction), not a contract mechanism.
 
 ### In-route capture is tolerated
 
-A sub-solver can keep surplus by capturing it in-route before the sweep. Accepted: it
-is bid-neutral, touches only value above its own signed floor, and guarding against it
+A sub-solver can keep surplus by capturing it in-route before the delta check. Accepted:
+it is bid-neutral, touches only value above its own signed floor, and guarding against it
 would reopen the filtered-approval arms race. Uncaptured padding is a donation to BYOS.
 
-### What survives
+### Residue and planted approvals
 
-Per-instance isolation, the storage-free instance, and signature-gated execution are
-unchanged. ADR-0001's containment story reverts to its original, stronger form: the
-instance is genuinely empty at rest, so a planted approval drains nothing — "the
-instance is not a wallet" is now literal.
+The instance may hold tokens at rest (unconsumed sell tokens from the last settlement).
+Route-planted approvals from previous settlements can interact with this residue.
+Per-instance isolation ([ADR-0001](0001-trampoline-topology.md)) confines the exposure:
+the only approvals on the instance are ones the sub-solver's own routes planted, and
+the only tokens at risk are the sub-solver's own residue — any drain through a planted
+approval is self-harm, not cross-sub-solver theft. The mitigation is prompt claiming
+and the BYOS approve-filter (defense-in-depth, best-effort).
 
 ## Alternatives considered
 
-- **Sub-solver-reclaimable residue via claim functions** (this ADR's original
-  decision). Coherent while its premises held; the context above lists how each fell.
-  Removing the claims also deletes an entry point and an event from the
-  security-critical contract.
+- **Sweep to settlement (no claim functions).** `execute` sweeps the instance's
+  remaining sell-token balance to `GPv2Settlement` after the route; residue returns to
+  BYOS through CoW's weekly accounting. Viable for the DEX/routing-API persona where
+  capital-recovery latency is acceptable. Rejected: introduces gas costs and makes it
+  impossible to implement the Private MM use case.
 - **Permissionless `sweep(token)` for strays, recipient hardcoded to the settlement.**
   No key and no theft surface, and BYOS would win most stray races. Dropped: strays
   are declared out of scope, and the function would exist only to chase donations and
   dust.
 - **Operator-gated claim with a free recipient.** Breaks the "operator can grief but
   not steal" invariant ([CONTEXT.md](../../CONTEXT.md)). Rejected.
-- **BYOS debit or freeze over the instance.** Still rejected for the original reason —
-  a key over sub-solver execution infrastructure — and now also pointless, since
-  nothing rests there.
+- **BYOS debit or freeze over the instance.** Rejected — introduces a privileged key
+  over sub-solver execution infrastructure, undermining the trust model.
 
 ## Consequences
 
-- The Trampoline loses `claimToken`/`claimTokens`, the `ResidueClaimed` event, and the
-  only-sub-solver error; `execute` gains the sweep and the delta check (implementation
-  follows ADR-0003). One external entry point remains.
-- Sub-solvers hold no on-chain property in the instance and need no claim workflow;
-  their compensation is in-route (venue fees) plus whatever they capture above their
-  own floor.
-- BYOS's weekly settlement-slippage line includes sub-solver over-delivery; any
-  per-sub-solver rebate would be an off-chain service choice, not a contract concern.
-- ADR-0001's zero-at-rest post-condition is restored as the enforced invariant for
-  trade tokens.
+- The instance may hold tokens at rest. The security argument shifts from "approvals
+  drain nothing because the instance is empty" to "approvals can only drain the
+  sub-solver's own residue" (per-instance isolation). ADR-0001's allowance-hygiene
+  section and ADR-0003's settlement-flow description must reflect this change.
+- `claimToken`/`claimTokens` are gated to the sub-solver. The `ResidueClaimed` event,
+  `Trampoline_OnlySubSolver`, and `Trampoline_EthClaimFailed` errors are part of the
+  contract surface.
+- Sub-solvers hold reclaimable property in their instance and must actively claim.
+  Residue is at risk to route-planted approvals while unclaimed.
+- BYOS's settlement slippage line no longer includes unconsumed sell tokens; only
+  buy-token over-delivery above the floor lands in the settlement.
+- Same-token hook orders (`sellToken == buyToken`) carry no swap to route, so no
+  sub-solver bids on them and they never reach `execute` — out of BYOS scope entirely.

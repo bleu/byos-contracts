@@ -20,7 +20,7 @@ import {ProposalSigning} from '../utils/ProposalSigning.sol';
 /// Uniswap V2 swap on a mainnet fork:
 ///   A. Direct — Settlement executes the swap itself (no trampoline)
 ///   C. Trampoline (output → Settlement) — route sends output directly to
-///      Settlement, sell-token sweep returns any unconsumed input
+///      Settlement; unconsumed input stays on instance as reclaimable residue
 contract GasBenchmark is Test {
   IGPv2Settlement constant SETTLEMENT = IGPv2Settlement(0x9008D19f58AAbD9eD0D60971565AA8510560ab41);
   IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -557,8 +557,7 @@ contract GasBenchmark is Test {
   function test_gas_benchmark_buy_order_usdc_to_weth() public onlyFork {
     // Buy order: user wants exactly 1 WETH, pays at most quotedIn + 1% of USDC.
     // The route uses swapTokensForExactTokens; the router pulls only quotedIn,
-    // leaving 1% of USDC as dust in the trampoline. The sell-token sweep returns
-    // the dust to the settlement.
+    // leaving 1% of USDC as residue on the instance (reclaimable by the sub-solver).
     uint256 desiredWeth = 1 ether;
     uint256 quotedIn = _quoteIn(address(USDC), address(WETH), desiredWeth);
     uint256 maxSellAmount = quotedIn * 101 / 100;
@@ -572,7 +571,7 @@ contract GasBenchmark is Test {
     uint256 gasA = vm.stopSnapshotGas('A-buy');
     assertTrue(vm.revertToState(snap));
 
-    // C: Trampoline buy order (sell-token sweep returns dust)
+    // C: Trampoline buy order (residue stays on instance)
     vm.startSnapshotGas('C-buy');
     _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth, quotedIn);
     uint256 gasC = vm.stopSnapshotGas('C-buy');
@@ -581,9 +580,9 @@ contract GasBenchmark is Test {
     console.log('=== Gas Benchmark: Buy order USDC -> WETH (Uniswap V2, 1 ETH) ===');
     console.log('A  Direct (no trampoline):             %d gas', gasA);
     console.log(
-      'C  Trampoline (sell-token sweep):       %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
+      'C  Trampoline (residue on instance):    %d gas  (+%d / +%d%%)', gasC, gasC - gasA, ((gasC - gasA) * 100) / gasA
     );
-    console.log('   Sell-token dust swept:               %d USDC', maxSellAmount - quotedIn);
+    console.log('   Sell-token residue on instance:      %d USDC', maxSellAmount - quotedIn);
     console.log('');
   }
 }

@@ -131,7 +131,7 @@ DEX or protocol. The Trampoline executes them as-is.
 
 Restricting to BYOS-known venues (structured routes) would defeat the permissionless
 any-DEX value proposition. [ADR-0001](0001-trampoline-topology.md) resolved that
-per-instance isolation + zero-balance sweep is the robust containment layer, and the
+per-instance isolation is the robust containment layer, and the
 approve-filter is best-effort defense-in-depth. The sub-solver is fully responsible for
 the complete route, including required hooks and approvals. BYOS can only accept or
 reject at gatekeeping, never patch.

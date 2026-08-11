@@ -1,11 +1,6 @@
 # Trampoline deployment & settlement integration
 
-Status: accepted; revised 2026-07-22
-
-> Previously the settle-back was an exact-amount `buyAmount` transfer, with surplus
-> stranding in the instance as sub-solver-reclaimable residue; revised so `buyAmount`
-> is a floor enforced by a balance-delta check and the instance sweeps both trade
-> tokens back to the settlement ([ADR-0008](0008-residue-disposition.md)).
+Status: accepted
 
 Builds on [ADR-0001](0001-trampoline-topology.md) (one Trampoline instance per
 sub-solver). That ADR fixed the topology. This one fixes the lifecycle: when an instance
@@ -70,18 +65,19 @@ amount has been pulled in):
 2. `Trampoline_S.execute(proposal, route, sellToken, buyToken, signature)` records the
    settlement's buy-token balance, runs the sub-solver's `route` (raw interactions
    from the proposal, delivering buy-token output directly to the settlement), then
-   its own contract code sweeps the instance's remaining sell-token balance to
-   `GPv2Settlement` and reverts unless the settlement's buy-token balance delta covers
-   `buyAmount` — the signed floor.
+   reverts unless the settlement's buy-token balance delta covers `buyAmount` — the
+   signed floor. Tokens remaining on the instance after execution (unconsumed sell
+   tokens, intermediate dust) are the sub-solver's property, reclaimable via claim
+   functions ([ADR-0008](0008-residue-disposition.md)).
 
 `GPv2Settlement` then pays the user via `transferToAccounts` out of its now-replenished
 balance.
 
-The sweep and the floor check are trampoline contract code, rather than
-sub-solver-authored interactions. That distinction is essential, because a malicious
-sub-solver could otherwise omit or redirect the value return. The sub-solver supplies
-only the `route`; the value return is enforced by the immutable trampoline logic. This is
-the same posture as the preventive approve-authoring layer in
+The floor check is trampoline contract code, rather than a sub-solver-authored
+interaction. That distinction is essential, because a malicious sub-solver could
+otherwise omit or redirect the value return. The sub-solver supplies only the `route`;
+the buy-token floor is enforced by the immutable trampoline logic. This is the same
+posture as the preventive approve-authoring layer in
 [ADR-0001](0001-trampoline-topology.md): BYOS authors the value-moving calls, and the
 sub-solver supplies only the route.
 
@@ -106,9 +102,9 @@ route code cannot re-enter the settlement.
 The `buyAmount` that funds the user must arrive fresh during `execute`, never be
 quietly covered from `GPv2Settlement`'s commingled buffer. The settlement's absolute
 balance proves nothing — the buffer would mask a route that delivers almost nothing —
-so `execute` asserts the *delta*: the settlement's buy-token balance after the route
-and sweep, against its balance on entry. `settle` is `nonReentrant` and only the route
-runs between the two readings, so the delta is attributable to the route:
+so `execute` asserts the *delta*: the settlement's buy-token balance after the route,
+against its balance on entry. `settle` is `nonReentrant` and only the route runs
+between the two readings, so the delta is attributable to the route:
 
 - it passes when at least `buyAmount` arrived fresh, so the settlement pays the user
   and BYOS's buffer is never net-drained; anything above the floor lands in the
@@ -118,11 +114,11 @@ runs between the two readings, so the delta is attributable to the route:
 
 No matching assertion is needed on the sell side. BYOS itself authors the interaction
 that pushes exactly `sellAmount` into the instance, and the route runs as the
-instance — a fund-less context that holds only that push and has no way to spend
-`GPv2Settlement`'s balance ([ADR-0001](0001-trampoline-topology.md)). The sweep
-returns whatever the route left unconsumed, so the settlement's net sell-token outflow
-is at most `sellAmount` by construction; an on-chain sell-token delta check would
-re-verify a bound the flow already enforces.
+instance — isolated from `GPv2Settlement`'s balance
+([ADR-0001](0001-trampoline-topology.md)). The settlement's net sell-token outflow is
+exactly `sellAmount` by construction — the push is the only transfer from
+`GPv2Settlement` to the instance, and unconsumed sell tokens remain on the instance as
+sub-solver property ([ADR-0008](0008-residue-disposition.md)).
 
 The floor is the bid. The sub-solver signs the minimum it is sure to deliver, below its
 simulated route output; margin sizing is its own tradeoff — too thin reverts and lands
@@ -132,28 +128,25 @@ filters thin ones is service policy, out of scope here.
 ### Both order kinds, one mechanism
 
 Nothing above is specific to sell orders. For either kind the instance receives the
-signed `sellAmount`, runs the route, sweeps the sell token, and `execute` asserts the
-same buy-token delta floor. Routes deliver buy-token output directly to the settlement.
-What changes is which amount the user fixed, and so where the slack shows up:
+signed `sellAmount`, runs the route, and `execute` asserts the same buy-token delta
+floor. Routes deliver buy-token output directly to the settlement. What changes is
+which amount the user fixed, and so where the slack shows up:
 
 | | Sell order | Buy order |
 |---|---|---|
 | User fixes | `sellAmount`; the route normally consumes all of it | `buyAmount`, the exact amount owed to the user |
 | Floor means | the minimum output the sub-solver commits to deliver | at least the user's exact `buyAmount` |
-| Typical leftover | buy-token over-delivery above the floor | unconsumed sell token, returned by the sweep |
+| Typical leftover | buy-token over-delivery above the floor (lands in settlement) | unconsumed sell token (stays on instance, sub-solver's property) |
 
-Either leftover lands in `GPv2Settlement` as BYOS-owned slippage
-([ADR-0008](0008-residue-disposition.md)). The user-facing fee wedge also flips sides —
-buy token for sell orders, sell token for buy orders — but that is the driver's price
-shift, downstream of and invisible to the trampoline; worked examples for both kinds
-are in [docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md).
+Buy-token over-delivery lands in `GPv2Settlement` as BYOS-owned slippage
+([ADR-0008](0008-residue-disposition.md)). Unconsumed sell tokens remain on the instance,
+reclaimable by the sub-solver. The user-facing fee wedge also flips sides — buy token for
+sell orders, sell token for buy orders — but that is the driver's price shift, downstream
+of and invisible to the trampoline; worked examples for both kinds are in
+[docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md).
 
-The mechanism also covers same-token hook orders (`sellToken == buyToken`, always with
-`sellAmount > buyAmount`), where the user submits the order mainly to run hooks and
-the difference funds them. The delta check stays sound because the snapshot is taken
-after the funding transfer has already left `GPv2Settlement`: the sell-token sweep
-returning the unconsumed input is the delivery it measures, and the floor still
-guarantees the settlement is never net-drained.
+Same-token hook orders (`sellToken == buyToken`) carry no swap to route, so no sub-solver
+bids on them and they never reach `execute` — they are out of BYOS scope entirely.
 
 ### Infra-failure attribution
 
@@ -186,16 +179,16 @@ balance.
 
 An exact-amount `buyAmount` transfer as the guard (this ADR's original decision) has
 the same revert threshold — a transfer of exactly X reverts below X — but it strands
-benign over-delivery and unconsumed sell tokens in the instance, which forces a residue
-disposition and claim machinery, and it cannot support routes that pay the settlement
-directly. Replaced by the floor, sweep, and delta check once the fee-mechanics review
-established that settlement-parked surplus returns to the solver weekly.
+benign over-delivery in the instance, cannot support routes that pay the settlement
+directly, and forces more complex residue disposition machinery. Replaced by the floor
+and delta check once the fee-mechanics review established that settlement-parked surplus
+returns to the solver weekly.
 
 ## Consequences
 
-- The hot path stays minimal: one transfer in, `execute` (route, sell-token sweep, one
-  delta assertion per settlement), and the instance ends every settlement empty of trade
-  tokens.
+- The hot path stays minimal: one transfer in, `execute` (route plus one delta
+  assertion), and the settlement completes. Tokens remaining on the instance are the
+  sub-solver's property ([ADR-0008](0008-residue-disposition.md)).
 - Self-funding is structural rather than a hope. A sub-solver's settlement can never
   net-drain BYOS's buffers, since the delta check reverts on shortfall.
 - Amounts are raw pre-fee quotes; the fee wedge accrues in `GPv2Settlement` by never

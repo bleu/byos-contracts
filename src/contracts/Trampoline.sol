@@ -54,7 +54,7 @@ contract Trampoline is ITrampoline {
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
-    address _sellToken,
+    address,
     address _buyToken,
     bytes calldata _signature
   ) external {
@@ -89,8 +89,6 @@ contract Trampoline is ITrampoline {
         }
       }
     }
-
-    _sweep(_sellToken);
 
     uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
     if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
@@ -160,20 +158,48 @@ contract Trampoline is ITrampoline {
     _balance = _buyToken == BUY_ETH_ADDRESS ? SETTLEMENT.balance : IERC20(_buyToken).balanceOf(SETTLEMENT);
   }
 
-  /// @dev Sweeps the instance's full balance of `_token` to the settlement.
-  /// Skips zero balances: some tokens revert on zero-value transfers.
-  function _sweep(
-    address _token
-  ) internal {
-    if (_token == BUY_ETH_ADDRESS) {
-      uint256 _balance = address(this).balance;
-      if (_balance == 0) return;
-      (bool _success,) = SETTLEMENT.call{value: _balance}('');
-      if (!_success) revert Trampoline_EthSettleBackFailed();
-    } else {
-      uint256 _balance = IERC20(_token).balanceOf(address(this));
-      if (_balance == 0) return;
-      IERC20(_token).safeTransfer(SETTLEMENT, _balance);
+  /// @inheritdoc ITrampoline
+  function claimToken(
+    address _token,
+    address _recipient
+  ) external {
+    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+
+    _claimToken(_token, _recipient);
+  }
+
+  /// @inheritdoc ITrampoline
+  function claimTokens(
+    address[] calldata _tokens,
+    address _recipient
+  ) external {
+    if (msg.sender != SUB_SOLVER) revert Trampoline_OnlySubSolver();
+
+    for (uint256 _i = 0; _i < _tokens.length; ++_i) {
+      _claimToken(_tokens[_i], _recipient);
     }
+  }
+
+  /**
+   * @notice Transfers the instance's full balance of `_token` to `_recipient`
+   * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
+   * @param _recipient The address receiving the claimed balance
+   */
+  function _claimToken(
+    address _token,
+    address _recipient
+  ) internal {
+    uint256 _amount;
+    if (_token == BUY_ETH_ADDRESS) {
+      _amount = address(this).balance;
+      if (_amount == 0) return;
+      (bool _success,) = _recipient.call{value: _amount}('');
+      if (!_success) revert Trampoline_EthClaimFailed();
+    } else {
+      _amount = IERC20(_token).balanceOf(address(this));
+      if (_amount == 0) return;
+      IERC20(_token).safeTransfer(_recipient, _amount);
+    }
+    emit ResidueClaimed(_token, _amount, _recipient);
   }
 }
