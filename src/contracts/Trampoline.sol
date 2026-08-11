@@ -192,10 +192,12 @@ contract Trampoline is ITrampoline {
     uint256 _amount;
     if (_token == BUY_ETH_ADDRESS) {
       _amount = address(this).balance;
+      if (_amount == 0) return;
       (bool _success,) = _recipient.call{value: _amount}('');
       if (!_success) revert Trampoline_EthClaimFailed();
     } else {
       _amount = IERC20(_token).balanceOf(address(this));
+      if (_amount == 0) return;
       IERC20(_token).safeTransfer(_recipient, _amount);
     }
     emit ResidueClaimed(_token, _amount, _recipient);

@@ -145,10 +145,8 @@ sell orders, sell token for buy orders — but that is the driver's price shift,
 of and invisible to the trampoline; worked examples for both kinds are in
 [docs/reference/cow-fee-collection.md](../reference/cow-fee-collection.md).
 
-Same-token hook orders (`sellToken == buyToken`) where the delivery depends on returning
-unconsumed sell tokens to the settlement are not supported: the route must deliver
-buy-token output directly to the settlement, and tokens remaining on the instance are
-not swept back ([ADR-0008](0008-residue-disposition.md)).
+Same-token hook orders (`sellToken == buyToken`) carry no swap to route, so no sub-solver
+bids on them and they never reach `execute` — they are out of BYOS scope entirely.
 
 ### Infra-failure attribution
 

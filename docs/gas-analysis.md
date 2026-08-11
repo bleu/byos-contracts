@@ -4,38 +4,37 @@ Gas comparison between a Uniswap V2 settlement executed directly by GPv2Settleme
 
 ## Overview
 
-The Trampoline adds **~67k gas (+33%)** of overhead to a single-order settlement compared to a hypothetical direct execution by Settlement. This is the cost of structural isolation: signature verification, access control, the balance-delta floor check, and the token transfers in and out of the sandbox.
+The Trampoline adds **~65k gas (+33%)** of overhead to a single-order settlement compared to a hypothetical direct execution by Settlement. This is the cost of structural isolation: signature verification, access control, the balance-delta floor check, and the token transfers in and out of the sandbox.
 
-The benchmark settles a 1 ETH WETH-to-USDC sell order against Uniswap V2. Both paths use the same order, clearing prices, and swap route -- the only difference is whether Settlement executes the swap itself or delegates to the Trampoline. The route sends swap output directly to Settlement; the trampoline only sweeps the sell token (a no-op for sell orders, a real transfer for buy orders returning unconsumed input).
+The benchmark settles a 1 ETH WETH-to-USDC sell order against Uniswap V2. Both paths use the same order, clearing prices, and swap route -- the only difference is whether Settlement executes the swap itself or delegates to the Trampoline. The route sends swap output directly to Settlement; any unconsumed sell tokens remain on the instance as the sub-solver's reclaimable residue ([ADR-0008](adr/0008-residue-disposition.md)).
 
 | Path | Gas | Overhead |
 |---|---|---|
-| Direct (Settlement calls Uniswap) | 199,920 | -- |
-| Trampoline (output to Settlement) | 267,206 | +67,286 (+33%) |
+| Direct (Settlement calls Uniswap) | ~200,000 | -- |
+| Trampoline (output to Settlement) | ~265,000 | ~+65,000 (+33%) |
 
 ## Overhead Breakdown
 
 | Category | Gas | % |
 |---|---|---|
-| `WETH.transfer(Settlement -> Trampoline)` | ~25,000 | 37% |
-| Settlement calldata/memory overhead | ~18,800 | 28% |
+| `WETH.transfer(Settlement -> Trampoline)` | ~25,000 | 38% |
+| Settlement calldata/memory overhead | ~18,800 | 29% |
 | `balanceOf(Settlement)` before snapshot (cold) | ~9,800 | 15% |
 | ABI decoding + memory inside execute | ~5,500 | 8% |
-| `balanceOf(Trampoline)` sell-token sweep check | ~2,000 | 3% |
 | EIP-712 hashing + ecrecover (assembly) | ~3,200 | 5% |
 | `Escrow.hasRole()` submitter check | ~2,700 | 4% |
 | `execute()` CALL opcode (cold address) | ~2,600 | 4% |
 | `Executed` event | ~1,500 | 2% |
 | `balanceOf(Settlement)` after snapshot (warm) | ~1,300 | 2% |
 | Warm/cold storage diff on approve | +4,000 | 6% |
-| Warm savings (USDC slot pre-warmed by before-snapshot) | -11,000 | -15% |
-| **Total** | **~67,300** | |
+| Warm savings (USDC slot pre-warmed by before-snapshot) | -11,000 | -17% |
+| **Total** | **~65,300** | |
 
 The warm savings entry is negative because the delta check's before-snapshot reads Settlement's USDC balance slot (cold, ~9,800), which warms it for the Uniswap pair's subsequent `USDC.transfer` to Settlement. In the direct path, that same transfer hits the slot cold and pays ~11,000 more. The cold read cost is paid once in both paths -- it just shifts between callsites. The net cost of the delta check is effectively just the after-snapshot (~1,300, warm).
 
 ### Note on buy orders
 
-The numbers above are for sell orders, where the route consumes all sellToken and sends output directly to Settlement -- the sell-token sweep is a no-op. In buy orders using `swapTokensForExactTokens`, the route leaves unconsumed sellToken in the Trampoline. The sell-token sweep does a real `safeTransfer` back to Settlement, adding ~25,000 gas on top of the baseline. A buy order benchmark scenario is included in the test suite.
+The numbers above are for sell orders, where the route consumes all sellToken and sends output directly to Settlement. In buy orders using `swapTokensForExactTokens`, the route leaves unconsumed sellToken on the instance as the sub-solver's reclaimable residue — there is no sweep back to Settlement. The trampoline overhead for buy orders is therefore comparable to sell orders; the sub-solver claims residue separately via `claimToken`/`claimTokens`. A buy order benchmark scenario is included in the test suite.
 
 ## Other Optimizations Considered
 
@@ -53,7 +52,7 @@ The two `balanceOf(Settlement)` calls (before and after the route) enforce the s
 
 ## Benchmark
 
-The benchmark script is at `test/fork/GasBenchmark.t.sol`. It compares direct settlement vs. trampoline-routed settlement for sell orders (WETH to USDC, USDC to ETH) and a buy order (USDC to WETH with sell-token dust), all against Uniswap V2 on a mainnet fork. `vm.snapshotState` resets chain state between runs. Router approvals are pre-warmed for a fair comparison, since the mainnet Settlement already holds standing `type(uint256).max` approvals.
+The benchmark script is at `test/fork/GasBenchmark.t.sol`. It compares direct settlement vs. trampoline-routed settlement for sell orders (WETH to USDC, USDC to ETH) and a buy order (USDC to WETH with unconsumed sell-token residue), all against Uniswap V2 on a mainnet fork. `vm.snapshotState` resets chain state between runs. Router approvals are pre-warmed for a fair comparison, since the mainnet Settlement already holds standing `type(uint256).max` approvals.
 
 ```
 forge test --match-contract GasBenchmark -vv

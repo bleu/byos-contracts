@@ -91,6 +91,5 @@ and the BYOS approve-filter (defense-in-depth, best-effort).
   Residue is at risk to route-planted approvals while unclaimed.
 - BYOS's settlement slippage line no longer includes unconsumed sell tokens; only
   buy-token over-delivery above the floor lands in the settlement.
-- Same-token hook orders (sellToken == buyToken) where delivery depends on returning
-  unconsumed sell tokens to the settlement are not supported; the route must deliver
-  buy-token output directly to the settlement.
+- Same-token hook orders (`sellToken == buyToken`) carry no swap to route, so no
+  sub-solver bids on them and they never reach `execute` — out of BYOS scope entirely.

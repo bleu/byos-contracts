@@ -197,8 +197,9 @@ interface ITrampoline {
    * @notice Transfers the instance's full balance of `_token` to `_recipient`
    * @dev Residue is the sub-solver's property (ADR-0008). The instance is storage-free
    * and cannot enumerate what it holds; the caller identifies tokens off-chain. Use
-   * BUY_ETH_ADDRESS to claim native ETH. Residue is at risk to allow-listed-solver
-   * replay while any signed proposal for this instance is unexpired — claim promptly.
+   * BUY_ETH_ADDRESS to claim native ETH. Unclaimed residue is exposed to route-planted
+   * approvals and to replay by BYOS submitters while any signed proposal for this
+   * instance is unexpired — claim promptly.
    * @param _token The token to claim; BUY_ETH_ADDRESS for native ETH
    * @param _recipient The address receiving the claimed balance
    */
