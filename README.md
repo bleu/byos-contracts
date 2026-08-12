@@ -14,7 +14,7 @@ Solidity contracts for the **Bring Your Own Solver (BYOS)** project — a bonded
 
 Sub-solvers submit EIP-712-signed routing proposals to BYOS, collateralized by their escrow balance. BYOS retains exclusive control over on-chain settlement. The Escrow contract is the only sub-solver capital BYOS touches — trade capital flows atomically through `GPv2Settlement`.
 
-Domain language and the architecture map live in [`CONTEXT.md`](CONTEXT.md). CoW protocol background (slashing framework, auction mechanics, solver CIPs) is under [`docs/reference/`](docs/reference/).
+Domain language and the architecture map live in [`CONTEXT.md`](CONTEXT.md). The normative BYOS specification and CoW protocol background are in [`docs/shared/`](docs/shared/) (a Git submodule).
 
 See [`docs/adr/`](docs/adr/) for architecture decision records:
 - [ADR-0001](docs/adr/0001-trampoline-topology.md) — Trampoline topology (one instance per sub-solver)

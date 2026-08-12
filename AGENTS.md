@@ -15,7 +15,7 @@ src/contracts/    Solidity source contracts
 test/             Forge tests (one directory per contract)
 script/           Deployment scripts
 docs/adr/         Architecture decision records
-docs/reference/   CoW protocol background (slashing, auctions, CIPs)
+docs/shared/      Shared BYOS specification (git submodule → bleu/byos-docs)
 docs/agents/      Agent workflow conventions (issue tracker, triage labels)
 ```
 
@@ -28,6 +28,12 @@ docs/agents/      Agent workflow conventions (issue tracker, triage labels)
   because…"_
 - Issues and PRDs live as local markdown under `.scratch/` — see
   [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+## Shared specification
+
+The normative BYOS specification lives in `docs/shared/` (a Git submodule pointing to [bleu/byos-docs](https://github.com/bleu/byos-docs)). Domain vocabulary is in `docs/shared/glossary.md`. The design document is `docs/shared/design-document.md`.
+
+**Rule**: ADRs in this repo record *why* a decision was made. They do not restate *what is true* — the specification does that. Each domain ADR carries a `Spec:` line citing the relevant section. If an ADR and the specification disagree, the specification is correct.
 
 ## Key conventions
 
