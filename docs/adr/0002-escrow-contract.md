@@ -27,13 +27,9 @@ Rejected: Option B (per-proposal EIP-712 signature verification on-chain). Trust
 
 ### Role separation: owner and operator
 
-Two distinct roles with separated concerns:
+Two distinct roles — owner (secure wallet) and operator (service EOA) — plus a submitter role for settlement submission. See the specification for the full role definitions and permissions.
 
-- **Owner** — a secure wallet (e.g., multisig/Safe) that owns the contract. Can set the operator, configure parameters (cooldown period), transfer ownership, and withdraw accumulated debits. All debited funds flow to the owner. Ownership transfer is two-step: owner calls `transferOwnership(newOwner)` to nominate a `pendingOwner`, then the pending owner calls `acceptOwnership()` to finalize. This prevents irrecoverable loss from address typos.
-- **Operator** — an EOA that sits in the BYOS service for automated operation. Can debit sub-solvers, freeze, and unfreeze. Cannot withdraw funds or change configuration.
-- **Submitter** (`SUBMITTER_ROLE`) — the EOA(s) the BYOS service submits settlements from. Holds no escrow authority at all; the role exists because `Trampoline.execute` requires `tx.origin` to hold it ([ADR-0005](0005-trampoline-execution-authority.md)), making the Escrow the submitter registry for its contract generation. Granted and revoked by the owner only — giving the operator this power would let a compromised operator authorize a rogue submitter to pass the trampoline's submission gate and replay signed routes, upgrading its blast radius beyond griefing.
-
-**Why separate?** The operator's private key is more exposed (lives in the BYOS service). If compromised, the attacker can debit sub-solver balances — but those funds go to the owner, not the attacker. The owner (cold wallet) can replace a compromised operator immediately. This limits the blast radius of a key compromise to griefing (illegitimate debits), not theft.
+**Why separate?** The operator's private key is more exposed (lives in the BYOS service). If compromised, the attacker can debit sub-solver balances — but debited funds go to the owner, not the attacker. The owner (cold wallet) can replace a compromised operator immediately. This limits the blast radius of a key compromise to griefing (illegitimate debits), not theft.
 
 ### Withdrawal semantics: all-or-nothing with cooldown
 
@@ -45,15 +41,7 @@ See the specification for the full withdrawal and freeze semantics, including th
 
 ### FX / reserve policy: off-chain
 
-No on-chain reserve multiplier or frozen-amount tracking. The contract is a dumb ledger; the BYOS service is the brain.
-
-**Track B flow:**
-1. CoW upholds EBBO claim and slashes BYOS in surplus token.
-2. BYOS service calls CoW quote API to convert claim amount to native-token equivalent.
-3. Operator calls `debit(subSolver, quotedAmount, reason)`.
-4. BYOS service tracks a **5x reserve** off-chain against pending claims, reducing the sub-solver's *service-level* effective balance (not on-chain). This buffer covers token appreciation over the investigation window (up to 3 months). If appreciation exceeds 5x, BYOS absorbs the tail risk.
-
-The 5x multiplier is a BYOS service parameter, tunable without contract changes.
+No on-chain reserve multiplier or frozen-amount tracking. The contract is a dumb ledger; the BYOS service is the brain. When CoW upholds an EBBO claim (Track B), the BYOS service converts the claim amount to native-token equivalent via CoW's quote API and the operator debits accordingly. A **5x reserve** is tracked off-chain against pending claims to cover token appreciation over the investigation window (up to 3 months). If appreciation exceeds 5x, BYOS absorbs the tail risk. The multiplier is a service parameter, tunable without contract changes.
 
 ### Debit withdrawals: permissionless sweep to owner
 
@@ -61,9 +49,7 @@ The 5x multiplier is a BYOS service parameter, tunable without contract changes.
 
 ### Deployment: immutable, deploys the Trampoline factory
 
-Simple, non-upgradeable contract. No proxy pattern. Immutability is a trust signal for sub-solvers — the code they deposit into won't change. If a v2 is needed, deploy a new contract; the cooldown-based withdrawal makes migration straightforward.
-
-The Escrow's constructor deploys the Trampoline factory itself (taking the GPv2Settlement address instead of a factory address). Trampoline instances bind to the Escrow as their submitter registry, and the factory needs the Escrow address before the Escrow could otherwise exist — self-deployment breaks that cycle without keys or precomputed addresses ([ADR-0005](0005-trampoline-execution-authority.md)). Escrow, factory, and EIP-712 domain thus form one deployment generation; a v2 Escrow means a v2 factory and domain.
+Simple, non-upgradeable contract. No proxy pattern. Immutability is a trust signal for sub-solvers — the code they deposit into won't change. If a v2 is needed, deploy a new contract; the cooldown-based withdrawal makes migration straightforward. The Escrow's constructor deploys the Trampoline factory, binding Escrow, factory, and EIP-712 domain into one deployment generation.
 
 ### No on-chain dispute mechanisms
 

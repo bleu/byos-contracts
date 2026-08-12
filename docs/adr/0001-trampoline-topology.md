@@ -14,13 +14,11 @@ The **Trampoline** is the contract that receives `sellAmount`, runs a sub-solver
 
 ### Why a Trampoline is needed at all
 
-In `GPv2Settlement.settle`, every interaction executes as a bare `call` from the settlement contract. `msg.sender` is `GPv2Settlement`, which holds all buffers and can be made to grant any approval. The only target it hard-blocks is the vault relayer ([`GPv2Settlement.sol#L446-L465`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2Settlement.sol#L446-L465); `GPv2Interaction.execute`). A permissionless sub-solver's code must never run in that context, or it would inherit buffer-spend and arbitrary-approve power over a contract shared by every CoW solver. The Trampoline re-runs the sub-solver's interactions as itself, isolated from settlement buffers and approvals. That holds for both topologies, so topology is not what buys buffer safety.
+In `GPv2Settlement.settle`, every interaction executes as a bare `call` from the settlement contract, inheriting buffer-spend and arbitrary-approve power. A permissionless sub-solver's code must never run in that context. The Trampoline re-runs the sub-solver's interactions as itself, isolated from settlement buffers and approvals. That holds for both topologies, so topology is not what buys buffer safety.
 
 ### Why structural isolation rather than a filter
 
-CoW's settlement contract does almost nothing to stop a solver from draining buffers or planting approvals; the only hard guard is the vault-relayer block. Its protection is social and economic. `settle` is `onlySolver`, gated by a manager-curated allowlist (`authenticator.isSolver`, [`GPv2Settlement.sol#L87-L89`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2Settlement.sol#L87-L89); `addSolver`/`removeSolver` are `onlyManager`, [`GPv2AllowListAuthentication.sol#L86-L97`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2AllowListAuthentication.sol#L86-L97)); vouched solvers post a bond; and a circuit breaker slashes or jails misbehavior. CoW trusts a permissioned, bonded set and punishes them, rather than constraining interactions in-contract.
-
-BYOS's sub-solvers are permissionless and unbonded (collateral-gated only), which is the actor that model refuses to let near `settle`. BYOS cannot reuse CoW's social boundary, so it rebuilds the boundary structurally: the Trampoline replaces the `onlySolver` allowlist (a sandbox instead of vouching), escrow replaces the DAO bond, and debit/slash replace circuit-breaker slashing. A recognize-and-block approve filter cannot carry that boundary, because CoW itself does not filter and "grant an allowance" has shapes a filter misses. For example, `Permit2.approve` uses a different target and selector yet still grants a drainable allowance on a real token. What a sub-solver cannot get around is a contract isolated from settlement buffers, where each sub-solver reaches only its own instance.
+CoW protects buffers through social and economic means — a permissioned, bonded solver set and circuit-breaker slashing — rather than constraining interactions in-contract. BYOS's sub-solvers are permissionless and unbonded (collateral-gated only), so BYOS cannot reuse CoW's social boundary. It rebuilds it structurally: the Trampoline replaces the allowlist (a sandbox instead of vouching), escrow replaces the bond, and debit/slash replace slashing. A recognize-and-block approve filter cannot carry that boundary — CoW itself does not filter, and "grant an allowance" has shapes a filter misses (e.g., `Permit2.approve`). What a sub-solver cannot get around is a contract isolated from settlement buffers, where each sub-solver reaches only its own instance.
 
 ### What topology actually governs
 
@@ -30,9 +28,7 @@ Because the Trampoline runs sub-solver-authored `call`s as itself, it grants ERC
 
 Adopt one Trampoline instance per sub-solver address.
 
-Instances live at a deterministic CREATE2 address keyed by the sub-solver address (recovered from the proposal's EIP-712 signature), counterfactual, with no registry and no governance step: the address is computed, not tracked. Deployment timing (at escrow-deposit time, paid by the sub-solver) is settled in [ADR-0003](0003-trampoline-deployment-settlement-integration.md).
-
-See the specification for the full topology contract, allowance hygiene details, native ETH handling, and deployment mechanics.
+See the specification for the full topology, deployment mechanics, allowance hygiene details, and native ETH handling.
 
 ## Alternatives considered
 
@@ -51,13 +47,5 @@ Per-instance isolation earns its keep on three separate things: confining residu
 ## Consequences
 
 - On-chain attribution ([ADR-0004](0004-penalty-schedule-and-attribution.md)): a distinct CREATE2 address per sub-solver means the settlement calldata proves which sub-solver's route ran. With the working "one sub-solver per settlement tx" decision, the per-instance call is itself the attribution, which gives a self-evidencing Track-A escrow debit with no reliance on BYOS's private records.
-- Deployment is permissionless and deterministic. Anyone may trigger the counterfactual deploy, and the address is derived from the sub-solver address. The RFP's stated downside of per-instance, "more deploys and bookkeeping", is largely neutralized by deterministic addressing.
+- Deployment is permissionless and deterministic. Anyone may trigger the counterfactual deploy, and the address is derived from the sub-solver address.
 - The isolation claim this ADR rests on — a route reaches only its own instance's balance, never settlement buffers, user funds, escrow collateral, or another instance — is proven adversarially against the real `GPv2Settlement` in [docs/shared/security/trampoline-settlement-isolation.md](../shared/security/trampoline-settlement-isolation.md).
-
-### Flagged downstream decisions (coupled, not settled here)
-
-Since acceptance, the first two forks were settled by [ADR-0005](0005-trampoline-execution-authority.md): execution is signature-gated and the payload is raw interactions. The upgrade-key posture was settled with the implementation: immutable full contracts per instance, deployed by the factory, with no proxy and no privileged key ([`Trampoline.sol`](../../src/contracts/Trampoline.sol)). The original flags are preserved below.
-
-- Execution authority: signature-gated versus BYOS-unilateral. The recommendation is signature-gated, so the reverted tx self-evidences exactly what the sub-solver authorized and the escrow debit is indisputable. This couples the proposal EIP-712 schema to the instance's authorization format, so it is settled with the proposal-API and attribution ADRs. cow-shed (`cowdao-grants/cow-shed`) is a per-user, signature-gated, CREATE2 proxy that already implements this shape and bubbles reverts, which BYOS needs, so it is a candidate implementation vehicle against a bespoke EIP-1167 clone.
-- Proposal payload shape: raw `interactions` versus a structured route. Raw calldata preserves any-DEX generality but makes the preventive approve-filter best-effort; a structured route (venues plus amounts, BYOS encodes every call) would let BYOS author all approvals and forbid sub-solver-authored ones outright, at the cost of generality. Settled with the proposal-API ADR; the topology and per-instance isolation hold either way.
-- Upgrade-key posture: immutable clones versus a cow-shed-style per-instance or beacon upgrade. Immutable clones carry no admin key, but a bug means deploying a new generation, with counterfactual migration and rotated attribution addresses. A beacon gives central upgradeability at the cost of a key over sub-solver execution. The recommended lean is immutable with no privileged key, to be confirmed alongside the execution-authority choice.

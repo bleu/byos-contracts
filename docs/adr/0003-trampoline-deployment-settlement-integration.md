@@ -9,45 +9,27 @@ Builds on [ADR-0001](0001-trampoline-topology.md) (one Trampoline instance per s
 
 ## Context
 
-Verified `settle()` order ([`GPv2Settlement.sol#L127-L142`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/GPv2Settlement.sol#L127-L142)): pre-interactions, then `vaultRelayer.transferFromAccounts` (pull the user's `sellAmount` into `GPv2Settlement`), then intra-interactions, then `transferToAccounts` (pay the user), then post-interactions. Three facts drive the decisions below.
-
-First, interactions run as `GPv2Settlement` (bare `call`), so BYOS encodes the value flow as ordinary interactions.
-
-Second, the user is paid from `GPv2Settlement`'s own balance, never pulled from an external contract ([`GPv2Transfer.sol#L145-L181`](https://github.com/cowprotocol/contracts/blob/c6b61ce75841ce4c25ab126def9cc981c568e6c6/src/contracts/libraries/GPv2Transfer.sol#L145-L181): ERC20 `safeTransfer` from `address(this)`, vault `sender = address(this)`, ETH from `this`). That balance is commingled: BYOS's buffer plus whatever the trampoline just pushed in. The trampoline cannot pay the user directly.
-
-Third, fees are a price wedge, not a transfer: the driver collects protocol and partner fees — and BYOS its gas cut — by shifting only the clearing prices, so a fee is whatever `GPv2Settlement` pulls in and does not send out, and settlement-parked surplus is returned to the solver by CoW's weekly accounting ([docs/shared/reference/cow-fee-collection.md](../shared/reference/cow-fee-collection.md)).
+Three facts about `GPv2Settlement.settle` drive the decisions below. First, interactions run as `GPv2Settlement` (bare `call`), so BYOS encodes the value flow as ordinary interactions. Second, the user is paid from `GPv2Settlement`'s own commingled balance — BYOS's buffer plus whatever the trampoline just pushed in — never pulled from an external contract. Third, fees are a price wedge, not a transfer: the driver collects fees by shifting clearing prices, and settlement-parked surplus is returned to the solver by CoW's weekly accounting ([docs/shared/reference/cow-fee-collection.md](../shared/reference/cow-fee-collection.md)).
 
 ## Decision
 
 ### Deployment
 
-Instances are deployed at a deterministic CREATE2 address keyed by sub-solver address, at escrow-deposit time, paid by the sub-solver: `Escrow.deposit()` triggers the factory deploy for the credited sub-solver (implemented: `Escrow.deposit` calls the factory's idempotent `ensureDeployed`). Settlements assume the instance exists: there is no on-chain `ensureDeployed` guard in the hot path, though BYOS may `eth_getCode` off-chain as a sanity check when building the solution.
+Instances are deployed at escrow-deposit time, paid by the sub-solver: `Escrow.deposit()` triggers the factory deploy. Settlements assume the instance exists — no on-chain `ensureDeployed` guard in the hot path.
 
-Rationale: the expected shape is few sub-solvers and many orders, so speculative deploys are rare and cheap, and the settlement path stays as simple and fast as possible (the guiding principle for this work). Cost is attributed to the party that benefits.
-
-Existence invariant: the API is permissionless but collateral-gated, so no escrow deposit means no valid proposal ([CONTEXT.md](../../CONTEXT.md)). Since deploy happens at deposit, a valid proposal implies a deployed trampoline, which makes "assume existence" a guarantee rather than a hope. The only residual is a reorg of the deposit tx, handled as an infra failure (see below).
+Rationale: the expected shape is few sub-solvers and many orders, so speculative deploys are rare and cheap, and the settlement path stays as simple and fast as possible. Since the API is collateral-gated and deploy happens at deposit, a valid proposal implies a deployed trampoline, making "assume existence" a guarantee rather than a hope.
 
 ### Settlement value flow
 
 See the specification for the full value flow, including sequence diagrams for the happy path, shortfall, and buy orders. The key contract-level decisions:
 
-BYOS encodes two intra-interactions (run as `GPv2Settlement`, after the user's sell amount has been pulled in):
-
-1. `sellToken.transfer(Trampoline_S, sellAmount)` pushes the route's consumption into the instance (legitimate: the user's sell tokens in transit, not buffers). `sellAmount` is the raw pre-fee quote the sub-solver signed; the fee wedge the user pays on top is never forwarded, so it accrues in `GPv2Settlement`, where the weekly accounting expects it.
-2. `Trampoline_S.execute(proposal, route, sellToken, buyToken, signature)` records the settlement's buy-token balance, runs the sub-solver's `route` (raw interactions from the proposal, delivering buy-token output directly to the settlement), then reverts unless the settlement's buy-token balance delta covers `buyAmount` — the signed floor. Tokens remaining on the instance after execution (unconsumed sell tokens, intermediate dust) are the sub-solver's property, reclaimable via claim functions ([ADR-0008](0008-residue-disposition.md)).
-
-Access control: `execute` is callable only in a settlement context (`msg.sender == GPv2Settlement`), only in a settlement submitted by BYOS (`tx.origin` must hold the Escrow's SUBMITTER_ROLE), and additionally requires the sub-solver's EIP-712 signature over the route, for non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
-
-Batching: the flow above is per-trade. Whether a settlement may carry more than one order, or more than one sub-solver, is governed by the attribution decision ([ADR-0004](0004-penalty-schedule-and-attribution.md)). `settle` is `nonReentrant`, so sub-solver route code cannot re-enter the settlement.
+- BYOS encodes two intra-interactions that push the user's sell tokens into the instance and call `execute`, which runs the sub-solver's route and reverts unless the settlement's buy-token balance delta covers the signed `buyAmount` floor. Tokens remaining on the instance after execution are the sub-solver's property ([ADR-0008](0008-residue-disposition.md)).
+- Access control layers three independent gates: settlement context (`msg.sender == GPv2Settlement`), BYOS submission (`tx.origin` holds SUBMITTER_ROLE), and the sub-solver's EIP-712 signature for non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
+- Amounts are raw pre-fee quotes the sub-solver signed; the fee wedge the user pays on top accrues in `GPv2Settlement`, where the weekly accounting expects it.
 
 ### Funding guard: the balance-delta check is the guard
 
-The `buyAmount` that funds the user must arrive fresh during `execute`, never be quietly covered from `GPv2Settlement`'s commingled buffer. The settlement's absolute balance proves nothing — the buffer would mask a route that delivers almost nothing — so `execute` asserts the *delta*: the settlement's buy-token balance after the route, against its balance on entry. `settle` is `nonReentrant` and only the route runs between the two readings, so the delta is attributable to the route:
-
-- it passes when at least `buyAmount` arrived fresh, so the settlement pays the user and BYOS's buffer is never net-drained; anything above the floor lands in the settlement as BYOS-owned slippage ([ADR-0008](0008-residue-disposition.md));
-- it reverts when the route fell short of the signed floor, so the settlement reverts and no trade happens.
-
-No matching assertion is needed on the sell side. BYOS itself authors the interaction that pushes exactly `sellAmount` into the instance, and the route runs as the instance — isolated from `GPv2Settlement`'s balance ([ADR-0001](0001-trampoline-topology.md)). The settlement's net sell-token outflow is exactly `sellAmount` by construction.
+The `buyAmount` that funds the user must arrive fresh during `execute`, never be quietly covered from `GPv2Settlement`'s commingled buffer. The settlement's absolute balance proves nothing — the buffer would mask a route that delivers almost nothing — so `execute` asserts the *delta*: the buy-token balance after the route against the balance on entry. `settle` is `nonReentrant` and only the route runs between the two readings, so the delta is attributable to the route. It passes when at least `buyAmount` arrived fresh (buffer never net-drained); it reverts on shortfall (no trade happens). No matching assertion is needed on the sell side — BYOS itself authors the interaction that pushes exactly `sellAmount` into the isolated instance.
 
 The floor is the bid. The sub-solver signs the minimum it is sure to deliver, below its simulated route output; margin sizing is its own tradeoff — too thin reverts and lands Track A debits, too thick loses auctions.
 
