@@ -1,6 +1,6 @@
 # Trampoline execution authority & proposal signature
 
-Status: accepted
+Status: accepted; revised 2026-08-14 (seven-field EIP-712 struct with minBuyAmount/maxBuyAmount)
 
 Spec: docs/shared/design-document.md#execution-authority
       https://bleu.github.io/byos-docs/design-document#execution-authority

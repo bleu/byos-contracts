@@ -1,6 +1,6 @@
 # Trampoline deployment & settlement integration
 
-Status: accepted
+Status: accepted; revised 2026-07-22 (floors, delta-check guard); revised 2026-08-14 (minBuyAmount/maxBuyAmount split)
 
 Spec: docs/shared/design-document.md#order-flow
       https://bleu.github.io/byos-docs/design-document#order-flow
