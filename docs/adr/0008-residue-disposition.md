@@ -18,7 +18,7 @@ CoW's fee mechanics make a sweep to settlement viable for the first persona: sur
 
 ## Decision
 
-Residue is the sub-solver's property. `claimToken`/`claimTokens` transfer the instance's full balance of the requested token(s) to a caller-chosen recipient, gated by `msg.sender == SUB_SOLVER`. There is no sweep from `execute`: routes deliver buy-token output directly to `GPv2Settlement`, and `execute` enforces `buyAmount` as a floor via the balance-delta check ([ADR-0003](0003-trampoline-deployment-settlement-integration.md)). Tokens remaining on the instance after execution stay there until claimed.
+Residue is the sub-solver's property. `claimToken`/`claimTokens` transfer the instance's full balance of the requested token(s) to a caller-chosen recipient, gated by `msg.sender == SUB_SOLVER`. There is no sweep from `execute`: routes deliver buy-token output directly to `GPv2Settlement`, and `execute` enforces `minBuyAmount` as a floor via the balance-delta check ([ADR-0003](0003-trampoline-deployment-settlement-integration.md)). Tokens remaining on the instance after execution stay there until claimed.
 
 See the specification for the full residue, stray token, and in-route capture rules.
 

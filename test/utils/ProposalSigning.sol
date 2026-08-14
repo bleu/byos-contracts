@@ -18,7 +18,8 @@ library ProposalSigning {
         PROPOSAL_TYPEHASH,
         proposal.orderUidHash,
         proposal.sellAmount,
-        proposal.buyAmount,
+        proposal.minBuyAmount,
+        proposal.maxBuyAmount,
         keccak256(abi.encode(interactions)),
         proposal.validUntil,
         proposal.nonce

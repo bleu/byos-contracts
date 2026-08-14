@@ -194,7 +194,8 @@ contract GasBenchmark is Test {
     proposal_ = ITrampoline.Proposal({
       orderUidHash: _orderUidHash,
       sellAmount: _sellAmount,
-      buyAmount: _buyAmount,
+      minBuyAmount: _buyAmount,
+      maxBuyAmount: _buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

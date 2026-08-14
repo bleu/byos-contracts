@@ -7,7 +7,7 @@ Spec: docs/shared/design-document.md#topology
 
 ## Context
 
-The **Trampoline** is the contract that receives `sellAmount`, runs a sub-solver's arbitrary interactions, and returns `buyAmount` to `GPv2Settlement` ([CONTEXT.md](../../CONTEXT.md); [RFP §High-Level Design](https://forum.cow.fi/t/rfp-bring-your-own-solver-byos/3469)). The RFP flags two topologies and leaves the call to the Core-Team Reviewer and grantee in M1:
+The **Trampoline** is the contract that receives `sellAmount`, runs a sub-solver's arbitrary interactions, and delivers buy-token output to `GPv2Settlement` ([CONTEXT.md](../../CONTEXT.md); [RFP §High-Level Design](https://forum.cow.fi/t/rfp-bring-your-own-solver-byos/3469)). The RFP flags two topologies and leaves the call to the Core-Team Reviewer and grantee in M1:
 
 - a single shared Trampoline with strict allowance hygiene, or
 - one instance per sub-solver address.

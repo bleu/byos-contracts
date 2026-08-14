@@ -128,7 +128,8 @@ contract ForkSettlementTest is Test {
     signed.data = ITrampoline.Proposal({
       orderUidHash: keccak256('fork-order-uid'),
       sellAmount: sellAmount,
-      buyAmount: buyAmount,
+      minBuyAmount: buyAmount,
+      maxBuyAmount: buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

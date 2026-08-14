@@ -97,9 +97,9 @@ contract Trampoline is ITrampoline {
     }
 
     uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
-    if (_delta < _proposal.buyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.buyAmount);
+    if (_delta < _proposal.minBuyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.minBuyAmount);
 
-    emit Executed(_proposal.orderUidHash, _delta, _proposal.buyAmount);
+    emit Executed(_proposal.orderUidHash, _delta, _proposal.minBuyAmount, _proposal.maxBuyAmount);
   }
 
   /// @dev Verifies the sub-solver's EIP-712 signature over the proposal and
@@ -124,11 +124,12 @@ contract Trampoline is ITrampoline {
       mstore(_ptr, _typeHash)
       mstore(add(_ptr, 0x20), calldataload(_proposal)) // orderUidHash
       mstore(add(_ptr, 0x40), calldataload(add(_proposal, 0x20))) // sellAmount
-      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40))) // buyAmount
-      mstore(add(_ptr, 0x80), _interactionsHash)
-      mstore(add(_ptr, 0xa0), calldataload(add(_proposal, 0x60))) // validUntil
-      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0x80))) // nonce
-      _structHash := keccak256(_ptr, 0xe0)
+      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40))) // minBuyAmount
+      mstore(add(_ptr, 0x80), calldataload(add(_proposal, 0x60))) // maxBuyAmount
+      mstore(add(_ptr, 0xa0), _interactionsHash)
+      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0x80))) // validUntil
+      mstore(add(_ptr, 0xe0), calldataload(add(_proposal, 0xa0))) // nonce
+      _structHash := keccak256(_ptr, 0x100)
     }
 
     bytes32 _digest;
