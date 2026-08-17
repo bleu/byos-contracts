@@ -200,7 +200,7 @@ contract GasBenchmark is Test {
       orderUidHash: _orderUidHash,
       sellAmount: _sellAmount,
       minBuyAmount: _buyAmount,
-      maxBuyAmount: _buyAmount,
+      quotedBuyAmount: _buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

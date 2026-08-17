@@ -72,7 +72,7 @@ contract TrampolineTest is Test {
       orderUidHash: keccak256('order-uid'),
       sellAmount: SELL_AMOUNT,
       minBuyAmount: BUY_AMOUNT,
-      maxBuyAmount: BUY_AMOUNT,
+      quotedBuyAmount: BUY_AMOUNT,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });
@@ -305,7 +305,7 @@ contract TrampolineTest is Test {
     ITrampoline.Interaction[] memory route = _swapRoute(output);
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = minBuyAmount;
-    proposal.maxBuyAmount = minBuyAmount;
+    proposal.quotedBuyAmount = minBuyAmount;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
@@ -322,11 +322,11 @@ contract TrampolineTest is Test {
     }
   }
 
-  function test_execute_succeeds_when_delta_between_min_and_max_buy_amount() public {
-    // Aggressive slippage: minBuyAmount < maxBuyAmount. The route delivers between
+  function test_execute_succeeds_when_delta_between_min_and_quoted_buy_amount() public {
+    // Loose slippage: minBuyAmount < quotedBuyAmount. The route delivers between
     // the floor and ceiling. The delta check passes (output >= minBuyAmount), and
     // the Executed event reports the ceiling so off-chain accounting can charge the
-    // sub-solver's escrow for maxBuyAmount - delta.
+    // sub-solver's escrow for quotedBuyAmount - delta.
     uint256 minBuy = 80 ether;
     uint256 maxBuy = 95 ether;
     uint256 delivered = 85 ether;
@@ -335,7 +335,7 @@ contract TrampolineTest is Test {
     ITrampoline.Interaction[] memory route = _swapRoute(delivered);
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = minBuy;
-    proposal.maxBuyAmount = maxBuy;
+    proposal.quotedBuyAmount = maxBuy;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.expectEmit(address(trampoline));
@@ -348,7 +348,7 @@ contract TrampolineTest is Test {
   }
 
   function test_execute_reverts_when_delta_below_min_buy_amount() public {
-    // Aggressive slippage: minBuyAmount < maxBuyAmount, but the route underdelivers
+    // Loose slippage: minBuyAmount < quotedBuyAmount, but the route underdelivers
     // even the floor. The delta check reverts.
     uint256 minBuy = 80 ether;
     uint256 maxBuy = 95 ether;
@@ -358,7 +358,7 @@ contract TrampolineTest is Test {
     ITrampoline.Interaction[] memory route = _swapRoute(delivered);
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = minBuy;
-    proposal.maxBuyAmount = maxBuy;
+    proposal.quotedBuyAmount = maxBuy;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
@@ -568,7 +568,7 @@ contract TrampolineTest is Test {
     });
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = 0;
-    proposal.maxBuyAmount = 0;
+    proposal.quotedBuyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
     vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
@@ -633,7 +633,7 @@ contract TrampolineTest is Test {
 
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = 0;
-    proposal.maxBuyAmount = 0;
+    proposal.quotedBuyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
@@ -758,7 +758,7 @@ contract TrampolineTest is Test {
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal = _proposal();
     proposal.minBuyAmount = netReceived;
-    proposal.maxBuyAmount = netReceived;
+    proposal.quotedBuyAmount = netReceived;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
@@ -769,7 +769,7 @@ contract TrampolineTest is Test {
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal2 = _proposal();
     proposal2.minBuyAmount = routeOutput;
-    proposal2.maxBuyAmount = routeOutput;
+    proposal2.quotedBuyAmount = routeOutput;
     proposal2.nonce = 1;
     bytes memory sig2 = _sign(subSolverKey, proposal2, route);
 

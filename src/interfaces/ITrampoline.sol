@@ -14,7 +14,7 @@ address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
  * field) is safe, but changing this string invalidates all outstanding signatures.
  */
 bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-  'ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 maxBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
+  'ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 quotedBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
 );
 
 /**
@@ -39,7 +39,7 @@ interface ITrampoline {
    * @param _orderUidHash Hash of the CoW order UID the proposal settles
    * @param _delta The measured growth of the settlement's buy-token balance
    * @param _floor The signed minBuyAmount the delta was checked against
-   * @param _ceiling The signed maxBuyAmount used as the clearing-price commitment
+   * @param _ceiling The signed quotedBuyAmount used as the clearing-price commitment
    */
   event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor, uint256 _ceiling);
 
@@ -74,10 +74,10 @@ interface ITrampoline {
    * @param sellAmount The sell amount pushed into the instance for the route
    * @param minBuyAmount The floor: the minimum growth of the settlement's buy-token
    * balance execute enforces. The delta check reverts when actual growth is below this.
-   * @param maxBuyAmount The ceiling: the clearing-price commitment. When minBuyAmount
-   * equals maxBuyAmount the sub-solver bears no slippage risk. When minBuyAmount is
-   * lower, the gap between maxBuyAmount and the actual delivery is charged against
-   * the sub-solver's escrow (and over-delivery above maxBuyAmount is credited back).
+   * @param quotedBuyAmount The ceiling: the clearing-price commitment. When minBuyAmount
+   * equals quotedBuyAmount the sub-solver bears no slippage risk. When minBuyAmount is
+   * lower, the gap between quotedBuyAmount and the actual delivery is charged against
+   * the sub-solver's escrow (and over-delivery above quotedBuyAmount is credited back).
    * @param validUntil Timestamp after which the proposal is no longer executable
    * @param nonce Sub-solver-chosen value distinguishing otherwise identical proposals
    */
@@ -85,7 +85,7 @@ interface ITrampoline {
     bytes32 orderUidHash;
     uint256 sellAmount;
     uint256 minBuyAmount;
-    uint256 maxBuyAmount;
+    uint256 quotedBuyAmount;
     uint256 validUntil;
     uint256 nonce;
   }
@@ -192,8 +192,8 @@ interface ITrampoline {
    * proposal's calldata is public and any allow-listed solver could otherwise replay it
    * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): minBuyAmount
    * is the floor the sub-solver signed, measured as the growth of the settlement's
-   * buy-token balance between entry and return. maxBuyAmount is the clearing-price
-   * commitment; the gap between maxBuyAmount and the actual delivery is settled
+   * buy-token balance between entry and return. quotedBuyAmount is the clearing-price
+   * commitment; the gap between quotedBuyAmount and the actual delivery is settled
    * off-chain against the sub-solver's escrow. Routes are expected to deliver
    * buy-token output directly to the settlement. Tokens remaining on the instance
    * after execution (unconsumed sell tokens, intermediate dust) are reclaimable by

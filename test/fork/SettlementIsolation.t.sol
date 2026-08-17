@@ -134,7 +134,7 @@ contract SettlementIsolationTest is Test {
       orderUidHash: keccak256('isolation-order-uid'),
       sellAmount: 0,
       minBuyAmount: 0,
-      maxBuyAmount: 0,
+      quotedBuyAmount: 0,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

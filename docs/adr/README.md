@@ -17,9 +17,9 @@ live with the BYOS service.
 |-----|----------|--------|
 | [0001](0001-trampoline-topology.md) | Trampoline topology: one instance per sub-solver | accepted |
 | [0002](0002-escrow-contract.md) | Escrow contract design (auth, withdrawal/freeze, FX) | accepted |
-| [0003](0003-trampoline-deployment-settlement-integration.md) | Trampoline deployment & settlement integration | accepted; revised 2026-07-22 (floors, delta-check guard); revised 2026-08-14 (minBuyAmount/maxBuyAmount split) |
+| [0003](0003-trampoline-deployment-settlement-integration.md) | Trampoline deployment & settlement integration | accepted |
 | [0004](0004-penalty-schedule-and-attribution.md) | Penalty schedule & attribution | accepted |
-| [0005](0005-trampoline-execution-authority.md) | Trampoline execution authority & proposal signature | accepted; revised 2026-08-14 (seven-field EIP-712 struct with minBuyAmount/maxBuyAmount) |
+| [0005](0005-trampoline-execution-authority.md) | Trampoline execution authority & proposal signature | accepted |
 | [0006](0006-solidity-style-and-natspec.md) | Solidity coding style & natspec conventions | accepted |
 | [0007](0007-erc20-escrow-token.md) | ERC20 escrow token (transfers, pause, expanded freeze) | accepted |
 | [0008](0008-residue-disposition.md) | Residue disposition: swept to the settlement | accepted; inverted 2026-07-22 (was sub-solver-reclaimable) |
