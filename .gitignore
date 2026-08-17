@@ -17,3 +17,5 @@ node_modules/
 coverage/
 lcov.info
 .claude/
+.DS_Store
+snapshots/GasBenchmark.json
