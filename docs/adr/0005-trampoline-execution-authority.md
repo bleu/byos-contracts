@@ -12,7 +12,7 @@ Spec: docs/shared/design-document.md#execution-authority
 
 ## Context
 
-Sub-solvers submit proposals `{order_uid, sell_amount, min_buy_amount, quoted_buy_amount, interactions, valid_until, nonce, signature}` to the BYOS service. [ADR-0001](0001-trampoline-topology.md) flagged two decisions as coupled to the proposal schema:
+Sub-solvers submit proposals `{order_uid, sell_amount, min_buy_amount, quote_buy_amount, interactions, valid_until, nonce, signature}` to the BYOS service. [ADR-0001](0001-trampoline-topology.md) flagged two decisions as coupled to the proposal schema:
 
 - **Execution authority** — whether the Trampoline's `execute` requires a sub-solver EIP-712 signature (signature-gated) or BYOS can call it unilaterally.
 - **Proposal payload shape** — raw `interactions` (any-DEX generality; approve-filter is best-effort) vs structured route (BYOS authors every call, can forbid sub-solver approvals; less general).
@@ -40,7 +40,7 @@ Once BYOS settles a proposal, its signature and route are public calldata, so wh
 
 Restricting to BYOS-known venues (structured routes) would defeat the permissionless any-DEX value proposition. [ADR-0001](0001-trampoline-topology.md) resolved that per-instance isolation is the robust containment layer, and the approve-filter is best-effort defense-in-depth. The sub-solver is fully responsible for the complete route, including required hooks and approvals. BYOS can only accept or reject at gatekeeping, never patch.
 
-The EIP-712 signed struct is `ProposalData` with seven fields: `orderUidHash`, `sellAmount`, `minBuyAmount`, `quotedBuyAmount`, `interactionsHash`, `validUntil`, `nonce`. The Solidity `Proposal` struct omits `interactionsHash` (recomputed on-chain from the interactions supplied at execution time). The `minBuyAmount`/`quotedBuyAmount` split allows sub-solvers to opt into loose slippage — see [ADR-0003](0003-trampoline-deployment-settlement-integration.md) for the floor/ceiling semantics. See the specification for the full domain separator and nonce semantics.
+The EIP-712 signed struct is `ProposalData` with seven fields: `orderUidHash`, `sellAmount`, `minBuyAmount`, `quoteBuyAmount`, `interactionsHash`, `validUntil`, `nonce`. The Solidity `Proposal` struct omits `interactionsHash` (recomputed on-chain from the interactions supplied at execution time). The `minBuyAmount`/`quoteBuyAmount` split allows sub-solvers to opt into loose slippage — see [ADR-0003](0003-trampoline-deployment-settlement-integration.md) for the floor/ceiling semantics. See the specification for the full domain separator and nonce semantics.
 
 ## Alternatives considered
 

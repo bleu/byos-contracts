@@ -134,7 +134,7 @@ contract ForkSettlementTest is Test {
       orderUidHash: keccak256('fork-order-uid'),
       sellAmount: sellAmount,
       minBuyAmount: buyAmount,
-      quotedBuyAmount: buyAmount,
+      quoteBuyAmount: buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

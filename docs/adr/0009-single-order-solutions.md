@@ -27,7 +27,7 @@ The current proposal schema ([ADR-0005](0005-trampoline-execution-authority.md))
 
 This means:
 
-- ADR-0005's schema is unaffected by this decision — the single-order constraint requires no typehash or domain change. (The schema was separately revised to add the `minBuyAmount`/`quotedBuyAmount` split; that revision is orthogonal to the single-order decision.)
+- ADR-0005's schema is unaffected by this decision — the single-order constraint requires no typehash or domain change. (The schema was separately revised to add the `minBuyAmount`/`quoteBuyAmount` split; that revision is orthogonal to the single-order decision.)
 - ADR-0003's multi-order sketch ("repeat transfer-in + `execute` per trade") is retired.
 - ADR-0004's static minimum escrow balance stays correctly sized: worst-case exposure per settlement is one order's `gas + c_l`.
 - One invariant for everything downstream: every BYOS settlement has exactly one order, one trampoline call, one sub-solver.
