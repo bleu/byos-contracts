@@ -477,11 +477,14 @@ contract GasBenchmark is Test {
     address _sellToken,
     address _buyToken,
     uint256 _maxSellAmount,
-    uint256 _exactBuyAmount,
-    uint256 _quotedIn
+    uint256 _exactBuyAmount
   ) internal {
+    // Use _maxSellAmount as the clearing-price sell amount so the
+    // settlement pulls the full maxSellAmount from the user.  The
+    // route's exact-output swap only consumes quotedIn; the residue
+    // (maxSellAmount − quotedIn) stays on the trampoline instance.
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
-      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _quotedIn);
+      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _maxSellAmount);
 
     ITrampoline.Interaction[] memory route =
       _swapRouteExactOutput(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, address(SETTLEMENT));
@@ -579,7 +582,7 @@ contract GasBenchmark is Test {
 
     // C: Trampoline buy order (residue stays on instance)
     vm.startSnapshotGas('C-buy');
-    _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth, quotedIn);
+    _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth);
     uint256 gasC = vm.stopSnapshotGas('C-buy');
 
     console.log('');
