@@ -71,7 +71,8 @@ contract TrampolineTest is Test {
     return ITrampoline.Proposal({
       orderUidHash: keccak256('order-uid'),
       sellAmount: SELL_AMOUNT,
-      buyAmount: BUY_AMOUNT,
+      minBuyAmount: BUY_AMOUNT,
+      quoteBuyAmount: BUY_AMOUNT,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });
@@ -124,7 +125,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.expectEmit(address(trampoline));
-    emit ITrampoline.Executed(proposal.orderUidHash, BUY_AMOUNT + surplus, BUY_AMOUNT);
+    emit ITrampoline.Executed(proposal.orderUidHash, BUY_AMOUNT + surplus, BUY_AMOUNT, BUY_AMOUNT);
 
     vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
@@ -280,7 +281,7 @@ contract TrampolineTest is Test {
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
-    proposal.buyAmount = BUY_AMOUNT - 10 ether;
+    proposal.minBuyAmount = BUY_AMOUNT - 10 ether;
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
@@ -293,21 +294,22 @@ contract TrampolineTest is Test {
   /// iff the route's output covers the floor; the settlement receives the full output
   /// (surplus included).
   function testFuzz_execute_succeeds_iff_route_output_covers_floor(
-    uint256 buyAmount,
+    uint256 minBuyAmount,
     uint256 output
   ) public {
     // The router pays output from its own inventory (minted in setUp).
-    buyAmount = bound(buyAmount, 0, 1_000_000 ether);
+    minBuyAmount = bound(minBuyAmount, 0, 1_000_000 ether);
     output = bound(output, 0, 1_000_000 ether);
 
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Interaction[] memory route = _swapRoute(output);
     ITrampoline.Proposal memory proposal = _proposal();
-    proposal.buyAmount = buyAmount;
+    proposal.minBuyAmount = minBuyAmount;
+    proposal.quoteBuyAmount = minBuyAmount;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    if (output >= buyAmount) {
+    if (output >= minBuyAmount) {
       trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
 
       assertEq(buyToken.balanceOf(settlement), output);
@@ -315,9 +317,53 @@ contract TrampolineTest is Test {
     } else {
       // Expect the delta-check error with its exact arguments, so an unrelated
       // revert (e.g. in the route) cannot make this branch pass.
-      vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, output, buyAmount));
+      vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, output, minBuyAmount));
       trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
     }
+  }
+
+  function test_execute_succeeds_when_delta_between_min_and_quote_buy_amount() public {
+    // Loose slippage: minBuyAmount < quoteBuyAmount. The route delivers between
+    // the floor and ceiling. The delta check passes (output >= minBuyAmount), and
+    // the Executed event reports the ceiling so off-chain accounting can charge the
+    // sub-solver's escrow for quoteBuyAmount - delta.
+    uint256 minBuy = 80 ether;
+    uint256 maxBuy = 95 ether;
+    uint256 delivered = 85 ether;
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(delivered);
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.minBuyAmount = minBuy;
+    proposal.quoteBuyAmount = maxBuy;
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.Executed(proposal.orderUidHash, delivered, minBuy, maxBuy);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
+
+    assertEq(buyToken.balanceOf(settlement), delivered);
+  }
+
+  function test_execute_reverts_when_delta_below_min_buy_amount() public {
+    // Loose slippage: minBuyAmount < quoteBuyAmount, but the route underdelivers
+    // even the floor. The delta check reverts.
+    uint256 minBuy = 80 ether;
+    uint256 maxBuy = 95 ether;
+    uint256 delivered = 79 ether;
+
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(delivered);
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.minBuyAmount = minBuy;
+    proposal.quoteBuyAmount = maxBuy;
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, delivered, minBuy));
+    trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
   }
 
   function test_execute_buy_order_leaves_unconsumed_sell_token_on_instance() public {
@@ -521,7 +567,8 @@ contract TrampolineTest is Test {
       target: address(sellToken), value: 0, callData: abi.encodeCall(IERC20.transfer, (makeAddr('sink'), SELL_AMOUNT))
     });
     ITrampoline.Proposal memory proposal = _proposal();
-    proposal.buyAmount = 0;
+    proposal.minBuyAmount = 0;
+    proposal.quoteBuyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
     vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(sellToken), address(buyToken), signature);
@@ -572,8 +619,8 @@ contract TrampolineTest is Test {
 
   // --- Threat analysis coverage (docs/security/threat-analysis.md) ---
 
-  function test_execute_with_zero_buyAmount_accepts_any_output() public {
-    // Gap G1: no on-chain buyAmount > 0 check. When buyAmount is 0, the floor
+  function test_execute_with_zero_minBuyAmount_accepts_any_output() public {
+    // Gap G1: no on-chain minBuyAmount > 0 check. When minBuyAmount is 0, the floor
     // is trivially met by any output (including 0), so a malicious sub-solver
     // can sign a proposal that captures sell tokens without delivering anything.
     sellToken.mint(address(trampoline), SELL_AMOUNT);
@@ -585,7 +632,8 @@ contract TrampolineTest is Test {
     });
 
     ITrampoline.Proposal memory proposal = _proposal();
-    proposal.buyAmount = 0;
+    proposal.minBuyAmount = 0;
+    proposal.quoteBuyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
@@ -706,20 +754,22 @@ contract TrampolineTest is Test {
       )
     });
 
-    // buyAmount <= netReceived → succeeds
+    // minBuyAmount <= netReceived → succeeds
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal = _proposal();
-    proposal.buyAmount = netReceived;
+    proposal.minBuyAmount = netReceived;
+    proposal.quoteBuyAmount = netReceived;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
     trampoline.execute(proposal, route, address(sellToken), address(feeToken), signature);
     assertEq(feeToken.balanceOf(settlement), netReceived);
 
-    // buyAmount == routeOutput (> netReceived) → reverts
+    // minBuyAmount == routeOutput (> netReceived) → reverts
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal2 = _proposal();
-    proposal2.buyAmount = routeOutput;
+    proposal2.minBuyAmount = routeOutput;
+    proposal2.quoteBuyAmount = routeOutput;
     proposal2.nonce = 1;
     bytes memory sig2 = _sign(subSolverKey, proposal2, route);
 

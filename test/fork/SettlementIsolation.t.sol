@@ -127,13 +127,14 @@ contract SettlementIsolationTest is Test {
     return abi.encodePacked(r, s, v);
   }
 
-  /// @dev A proposal with no swap: buyAmount 0, so the floor is trivially met, the
+  /// @dev A proposal with no swap: minBuyAmount 0, so the floor is trivially met, the
   /// sweep finds nothing to move, and the route's own interactions are all that runs.
   function _emptyProposal() internal view returns (ITrampoline.Proposal memory) {
     return ITrampoline.Proposal({
       orderUidHash: keccak256('isolation-order-uid'),
       sellAmount: 0,
-      buyAmount: 0,
+      minBuyAmount: 0,
+      quoteBuyAmount: 0,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

@@ -65,6 +65,11 @@ contract ForkSettlementTest is Test {
     (user, userKey) = makeAddrAndKey('user');
     (subSolver, subSolverKey) = makeAddrAndKey('subSolver');
 
+    // makeAddr-derived addresses can collide with deployed mainnet contracts
+    // (e.g. EIP-7702 delegated EOAs). Strip any code so .transfer() with the
+    // 2300 gas stipend succeeds when GPv2Settlement pays the user in native ETH.
+    vm.etch(user, '');
+
     // Allow-list the BYOS solver as the authenticator's manager would.
     IGPv2Authentication auth = IGPv2Authentication(SETTLEMENT.authenticator());
     vm.prank(auth.manager());
@@ -128,7 +133,8 @@ contract ForkSettlementTest is Test {
     signed.data = ITrampoline.Proposal({
       orderUidHash: keccak256('fork-order-uid'),
       sellAmount: sellAmount,
-      buyAmount: buyAmount,
+      minBuyAmount: buyAmount,
+      quoteBuyAmount: buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });

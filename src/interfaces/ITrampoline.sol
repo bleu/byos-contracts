@@ -9,12 +9,12 @@ address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
 /**
  * @dev EIP-712 type hash of the signed proposal struct. The type name "ProposalData"
- * and its six fields are fixed by ADR-0005 and baked into every sub-solver signature —
+ * and its seven fields are fixed by ADR-0005 and baked into every sub-solver signature —
  * renaming the Solidity struct (`Proposal`, which omits the derived interactionsHash
  * field) is safe, but changing this string invalidates all outstanding signatures.
  */
 bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-  'ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
+  'ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 quoteBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
 );
 
 /**
@@ -38,9 +38,10 @@ interface ITrampoline {
    * covered the floor (ADR-0003)
    * @param _orderUidHash Hash of the CoW order UID the proposal settles
    * @param _delta The measured growth of the settlement's buy-token balance
-   * @param _floor The signed buyAmount the delta was checked against
+   * @param _floor The signed minBuyAmount the delta was checked against
+   * @param _ceiling The signed quoteBuyAmount used as the clearing-price commitment
    */
-  event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor);
+  event Executed(bytes32 indexed _orderUidHash, uint256 _delta, uint256 _floor, uint256 _ceiling);
 
   /**
    * @notice The sub-solver has claimed residue from its instance (ADR-0008)
@@ -71,15 +72,20 @@ interface ITrampoline {
    * recomputed on-chain from the interactions actually being executed
    * @param orderUidHash Hash of the CoW order UID the proposal settles
    * @param sellAmount The sell amount pushed into the instance for the route
-   * @param buyAmount The floor: the minimum growth of the settlement's buy-token
-   * balance execute enforces
+   * @param minBuyAmount The floor: the minimum growth of the settlement's buy-token
+   * balance execute enforces. The delta check reverts when actual growth is below this.
+   * @param quoteBuyAmount The ceiling: the clearing-price commitment. When minBuyAmount
+   * equals quoteBuyAmount the sub-solver bears no slippage risk. When minBuyAmount is
+   * lower, the gap between quoteBuyAmount and the actual delivery is charged against
+   * the sub-solver's escrow (and over-delivery above quoteBuyAmount is credited back).
    * @param validUntil Timestamp after which the proposal is no longer executable
    * @param nonce Sub-solver-chosen value distinguishing otherwise identical proposals
    */
   struct Proposal {
     bytes32 orderUidHash;
     uint256 sellAmount;
-    uint256 buyAmount;
+    uint256 minBuyAmount;
+    uint256 quoteBuyAmount;
     uint256 validUntil;
     uint256 nonce;
   }
@@ -118,7 +124,7 @@ interface ITrampoline {
    * @notice Throws if the settlement's buy-token balance grew by less than the
    * signed floor
    * @param _delta The measured growth of the settlement's buy-token balance
-   * @param _floor The signed buyAmount required
+   * @param _floor The signed minBuyAmount required
    */
   error Trampoline_FloorNotMet(uint256 _delta, uint256 _floor);
 
@@ -180,19 +186,20 @@ interface ITrampoline {
 
   /**
    * @notice Executes a sub-solver's signed route and reverts unless the settlement's
-   * buy-token balance grew by at least `_proposal.buyAmount`
+   * buy-token balance grew by at least `_proposal.minBuyAmount`
    * @dev Callable only by the settlement contract, and only in a settlement submitted
    * by a BYOS submitter: tx.origin must hold the Escrow's SUBMITTER_ROLE, since a live
    * proposal's calldata is public and any allow-listed solver could otherwise replay it
-   * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): buyAmount is
-   * the floor the sub-solver signed, measured as the growth of the settlement's
-   * buy-token balance between entry and return. Routes are expected to deliver
-   * buy-token output directly to the settlement. Anything above the floor lands in
-   * the settlement as BYOS-owned slippage (ADR-0008). Tokens remaining on the
-   * instance after execution (unconsumed sell tokens, intermediate dust) are
-   * reclaimable by the sub-solver via `claimToken`/`claimTokens`. The tokens are
-   * BYOS-supplied call parameters taken from the order, not signed proposal fields.
-   * When `_buyToken` is BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
+   * (ADR-0005). The balance-delta check is the funding guard (ADR-0003): minBuyAmount
+   * is the floor the sub-solver signed, measured as the growth of the settlement's
+   * buy-token balance between entry and return. quoteBuyAmount is the clearing-price
+   * commitment; the gap between quoteBuyAmount and the actual delivery is settled
+   * off-chain against the sub-solver's escrow. Routes are expected to deliver
+   * buy-token output directly to the settlement. Tokens remaining on the instance
+   * after execution (unconsumed sell tokens, intermediate dust) are reclaimable by
+   * the sub-solver via `claimToken`/`claimTokens`. The tokens are BYOS-supplied call
+   * parameters taken from the order, not signed proposal fields. When `_buyToken` is
+   * BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
    * @param _sellToken The trade's sell token (unused in execute, retained for interface compatibility)

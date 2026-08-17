@@ -17,7 +17,7 @@ live with the BYOS service.
 |-----|----------|--------|
 | [0001](0001-trampoline-topology.md) | Trampoline topology: one instance per sub-solver | accepted |
 | [0002](0002-escrow-contract.md) | Escrow contract design (auth, withdrawal/freeze, FX) | accepted |
-| [0003](0003-trampoline-deployment-settlement-integration.md) | Trampoline deployment & settlement integration | accepted; revised 2026-07-22 (floors, delta-check guard) |
+| [0003](0003-trampoline-deployment-settlement-integration.md) | Trampoline deployment & settlement integration | accepted |
 | [0004](0004-penalty-schedule-and-attribution.md) | Penalty schedule & attribution | accepted |
 | [0005](0005-trampoline-execution-authority.md) | Trampoline execution authority & proposal signature | accepted |
 | [0006](0006-solidity-style-and-natspec.md) | Solidity coding style & natspec conventions | accepted |

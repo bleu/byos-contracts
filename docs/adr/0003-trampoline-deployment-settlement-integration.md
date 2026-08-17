@@ -23,13 +23,21 @@ Rationale: the expected shape is few sub-solvers and many orders, so speculative
 
 See the specification for the full value flow, including sequence diagrams for the happy path, shortfall, and buy orders. The key contract-level decisions:
 
-- BYOS encodes two intra-interactions that push the user's sell tokens into the instance and call `execute`, which runs the sub-solver's route and reverts unless the settlement's buy-token balance delta covers the signed `buyAmount` floor. Tokens remaining on the instance after execution are the sub-solver's property ([ADR-0008](0008-residue-disposition.md)).
+- BYOS encodes two intra-interactions that push the user's sell tokens into the instance and call `execute`, which runs the sub-solver's route and reverts unless the settlement's buy-token balance delta covers the signed `minBuyAmount` floor. Tokens remaining on the instance after execution are the sub-solver's property ([ADR-0008](0008-residue-disposition.md)).
 - Access control layers three independent gates: settlement context (`msg.sender == GPv2Settlement`), BYOS submission (`tx.origin` holds SUBMITTER_ROLE), and the sub-solver's EIP-712 signature for non-repudiation ([ADR-0005](0005-trampoline-execution-authority.md)).
 - Amounts are raw pre-fee quotes the sub-solver signed; the fee wedge the user pays on top accrues in `GPv2Settlement`, where the weekly accounting expects it.
 
 ### Funding guard: the balance-delta check is the guard
 
-The `buyAmount` that funds the user must arrive fresh during `execute`, never be quietly covered from `GPv2Settlement`'s commingled buffer. The settlement's absolute balance proves nothing — the buffer would mask a route that delivers almost nothing — so `execute` asserts the *delta*: the buy-token balance after the route against the balance on entry. `settle` is `nonReentrant` and only the route runs between the two readings, so the delta is attributable to the route. It passes when at least `buyAmount` arrived fresh (buffer never net-drained); it reverts on shortfall (no trade happens). No matching assertion is needed on the sell side — BYOS itself authors the interaction that pushes exactly `sellAmount` into the isolated instance.
+The buy-token output that funds the user must arrive fresh during `execute`, never be quietly covered from `GPv2Settlement`'s commingled buffer. The settlement's absolute balance proves nothing — the buffer would mask a route that delivers almost nothing — so `execute` asserts the *delta*: the buy-token balance after the route against the balance on entry. `settle` is `nonReentrant` and only the route runs between the two readings, so the delta is attributable to the route. It passes when at least `minBuyAmount` arrived fresh (buffer never net-drained); it reverts on shortfall (no trade happens). No matching assertion is needed on the sell side — BYOS itself authors the interaction that pushes exactly `sellAmount` into the isolated instance.
+
+### Floor and ceiling: `minBuyAmount` and `quoteBuyAmount`
+
+The proposal carries two signed buy-amount fields. `minBuyAmount` is the floor — the hard revert threshold the delta check enforces on-chain. `quoteBuyAmount` is the ceiling — the clearing-price commitment used by the BYOS service for off-chain accounting.
+
+**Sell orders:** `sellAmount` (and therefore `minSellAmount` / `maxSellAmount` in the service) equals the order's sell amount. When `minBuyAmount` equals `quoteBuyAmount`, the behaviour matches a fixed-amount proposal: the expected output must arrive or the settlement reverts, and the clearing price fully accounts for slippage. When `minBuyAmount` is lower than `quoteBuyAmount`, the sub-solver accepts loose slippage. The delta check enforces `minBuyAmount`; the clearing price is set from `quoteBuyAmount`. The difference `quoteBuyAmount − actualDelta` is charged against the sub-solver's escrow (because BYOS is charged the same way by CoW). If the route over-delivers (`actualDelta > quoteBuyAmount`), BYOS credits the sub-solver later.
+
+**Buy orders:** the same struct fields exist, but loose slippage works differently. In a sell order the sub-solver promises to deliver tokens; in a buy order the promise is to consume fewer tokens. The extra tokens (those not priced into the clearing price) must be available on the Trampoline at the start of execution, but BYOS has no mechanism to source them for the sub-solver. A sub-solver who wants loose slippage on buy orders should pre-fund their Trampoline instance with buffer tokens — the equivalent skin-in-the-game posture.
 
 The floor is the bid. The sub-solver signs the minimum it is sure to deliver, below its simulated route output; margin sizing is its own tradeoff — too thin reverts and lands Track A debits, too thick loses auctions.
 
@@ -47,12 +55,13 @@ A lazy in-settlement deploy (an idempotent `ensureDeployed` guard) was rejected 
 
 A commingled payout with no check (relying solely on `transferToAccounts`) was rejected because BYOS's buffer can silently mask a sub-solver shortfall. A malicious instance that routes `sellAmount` to the sub-solver and delivers almost nothing would drain BYOS principal up to the buffer size, with no revert to trigger Track A. Per-instance isolation does not cover this, because the loss lands at `GPv2Settlement`, outside any trampoline. The delta assertion is what closes it — not the settlement's absolute balance.
 
-An exact-amount `buyAmount` transfer as the guard (this ADR's original decision) has the same revert threshold — a transfer of exactly X reverts below X — but it strands benign over-delivery in the instance, cannot support routes that pay the settlement directly, and forces more complex residue disposition machinery. Replaced by the floor and delta check once the fee-mechanics review established that settlement-parked surplus returns to the solver weekly.
+An exact-amount transfer as the guard (this ADR's original decision) has the same revert threshold — a transfer of exactly X reverts below X — but it strands benign over-delivery in the instance, cannot support routes that pay the settlement directly, and forces more complex residue disposition machinery. Replaced by the floor and delta check once the fee-mechanics review established that settlement-parked surplus returns to the solver weekly.
 
 ## Consequences
 
 - The hot path stays minimal: one transfer in, `execute` (route plus one delta assertion), and the settlement completes. Tokens remaining on the instance are the sub-solver's property ([ADR-0008](0008-residue-disposition.md)).
-- Self-funding is structural rather than a hope. A sub-solver's settlement can never net-drain BYOS's buffers, since the delta check reverts on shortfall.
+- Self-funding is structural rather than a hope. A sub-solver's settlement can never net-drain BYOS's buffers, since the delta check reverts on shortfall against `minBuyAmount`.
+- The `quoteBuyAmount` ceiling enables loose slippage for sell orders without weakening the on-chain revert guard. Off-chain accounting uses `quoteBuyAmount` to compute escrow charges; the contract only enforces the floor.
 - Amounts are raw pre-fee quotes; the fee wedge accrues in `GPv2Settlement` by never being forwarded, and surplus custody is settled by [ADR-0008](0008-residue-disposition.md).
 - Couplings: deployment couples to the escrow-deposit flow ([ADR-0002](0002-escrow-contract.md)); the infra-failure-versus-sub-solver-fault split couples to attribution ([ADR-0004](0004-penalty-schedule-and-attribution.md)).
 - Solver-engine invariant: never submit a settlement routing through a non-deployed trampoline, since there is no on-chain safety net by design.

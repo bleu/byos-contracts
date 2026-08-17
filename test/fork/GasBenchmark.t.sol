@@ -59,6 +59,11 @@ contract GasBenchmark is Test {
     (user, userKey) = makeAddrAndKey('user');
     (subSolver, subSolverKey) = makeAddrAndKey('subSolver');
 
+    // makeAddr-derived addresses can collide with deployed mainnet contracts
+    // (e.g. EIP-7702 delegated EOAs). Strip any code so .transfer() with the
+    // 2300 gas stipend succeeds when GPv2Settlement pays the user in native ETH.
+    vm.etch(user, '');
+
     IGPv2Authentication auth = IGPv2Authentication(SETTLEMENT.authenticator());
     vm.prank(auth.manager());
     auth.addSolver(solver);
@@ -194,7 +199,8 @@ contract GasBenchmark is Test {
     proposal_ = ITrampoline.Proposal({
       orderUidHash: _orderUidHash,
       sellAmount: _sellAmount,
-      buyAmount: _buyAmount,
+      minBuyAmount: _buyAmount,
+      quoteBuyAmount: _buyAmount,
       validUntil: block.timestamp + 1 hours,
       nonce: 0
     });
@@ -471,11 +477,14 @@ contract GasBenchmark is Test {
     address _sellToken,
     address _buyToken,
     uint256 _maxSellAmount,
-    uint256 _exactBuyAmount,
-    uint256 _quotedIn
+    uint256 _exactBuyAmount
   ) internal {
+    // Use _maxSellAmount as the clearing-price sell amount so the
+    // settlement pulls the full maxSellAmount from the user.  The
+    // route's exact-output swap only consumes quotedIn; the residue
+    // (maxSellAmount − quotedIn) stays on the trampoline instance.
     (address[] memory tokens, uint256[] memory prices, GPv2TradeData[] memory trades) =
-      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _quotedIn);
+      _buildBuyTrade(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, _maxSellAmount);
 
     ITrampoline.Interaction[] memory route =
       _swapRouteExactOutput(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, address(SETTLEMENT));
@@ -573,7 +582,7 @@ contract GasBenchmark is Test {
 
     // C: Trampoline buy order (residue stays on instance)
     vm.startSnapshotGas('C-buy');
-    _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth, quotedIn);
+    _settleViaTrampolineBuyOrder(address(USDC), address(WETH), maxSellAmount, desiredWeth);
     uint256 gasC = vm.stopSnapshotGas('C-buy');
 
     console.log('');

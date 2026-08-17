@@ -30,7 +30,8 @@ contract Eip712Vectors is Test {
   struct Inputs {
     bytes orderUid;
     uint256 sellAmount;
-    uint256 buyAmount;
+    uint256 minBuyAmount;
+    uint256 quoteBuyAmount;
     uint256 validUntil;
     uint256 nonce;
     ITrampoline.Interaction[] interactions;
@@ -51,7 +52,8 @@ contract Eip712Vectors is Test {
     _cases[0] = Inputs({
       orderUid: bytes.concat(bytes28(0), bytes20(_subSolver), bytes8(0)),
       sellAmount: 1e18,
-      buyAmount: 5e6,
+      minBuyAmount: 5e6,
+      quoteBuyAmount: 5e6,
       validUntil: 1_750_000_000,
       nonce: 0,
       interactions: new ITrampoline.Interaction[](0)
@@ -61,7 +63,8 @@ contract Eip712Vectors is Test {
     _cases[1] = Inputs({
       orderUid: bytes.concat(bytes28(uint224(1)), bytes20(_subSolver), bytes8(uint64(7))),
       sellAmount: 123_456_789,
-      buyAmount: 987_654_321,
+      minBuyAmount: 900_000_000,
+      quoteBuyAmount: 987_654_321,
       validUntil: 1_750_000_060,
       nonce: 1,
       interactions: new ITrampoline.Interaction[](1)
@@ -74,7 +77,8 @@ contract Eip712Vectors is Test {
     _cases[2] = Inputs({
       orderUid: bytes.concat(bytes28(type(uint224).max), bytes20(_subSolver), bytes8(type(uint64).max)),
       sellAmount: type(uint256).max,
-      buyAmount: 1,
+      minBuyAmount: 1,
+      quoteBuyAmount: 1,
       validUntil: type(uint32).max,
       nonce: type(uint256).max,
       interactions: new ITrampoline.Interaction[](2)
@@ -113,7 +117,8 @@ contract Eip712Vectors is Test {
     ITrampoline.Proposal memory _proposal = ITrampoline.Proposal({
       orderUidHash: keccak256(_inputs.orderUid),
       sellAmount: _inputs.sellAmount,
-      buyAmount: _inputs.buyAmount,
+      minBuyAmount: _inputs.minBuyAmount,
+      quoteBuyAmount: _inputs.quoteBuyAmount,
       validUntil: _inputs.validUntil,
       nonce: _inputs.nonce
     });
@@ -125,7 +130,8 @@ contract Eip712Vectors is Test {
 
     _json = string.concat('{"orderUid":"', vm.toString(_inputs.orderUid), '"');
     _json = string.concat(_json, ',"sellAmount":"', vm.toString(_inputs.sellAmount), '"');
-    _json = string.concat(_json, ',"buyAmount":"', vm.toString(_inputs.buyAmount), '"');
+    _json = string.concat(_json, ',"minBuyAmount":"', vm.toString(_inputs.minBuyAmount), '"');
+    _json = string.concat(_json, ',"quoteBuyAmount":"', vm.toString(_inputs.quoteBuyAmount), '"');
     _json = string.concat(_json, ',"validUntil":', vm.toString(_inputs.validUntil));
     _json = string.concat(_json, ',"nonce":"', vm.toString(_inputs.nonce), '"');
     _json = string.concat(_json, ',"interactions":', _interactionsJson(_inputs.interactions));
@@ -145,7 +151,8 @@ contract Eip712Vectors is Test {
         PROPOSAL_TYPEHASH,
         _proposal.orderUidHash,
         _proposal.sellAmount,
-        _proposal.buyAmount,
+        _proposal.minBuyAmount,
+        _proposal.quoteBuyAmount,
         keccak256(abi.encode(_interactions)),
         _proposal.validUntil,
         _proposal.nonce
