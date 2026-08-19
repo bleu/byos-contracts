@@ -64,6 +64,7 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
     string memory _name,
     string memory _symbol
   ) ERC20(_name, _symbol) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
+    if (_adminTransferDelay > type(uint48).max / 2) revert Escrow_InvalidAdminTransferDelay();
     if (_settlement == address(0)) revert Escrow_ZeroAddress();
     if (_cooldownPeriod > _MAX_COOLDOWN_PERIOD) revert Escrow_CooldownPeriodTooLong();
     _grantRole(OPERATOR_ROLE, _operator);

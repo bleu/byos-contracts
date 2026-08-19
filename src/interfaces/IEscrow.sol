@@ -166,6 +166,11 @@ interface IEscrow is IERC20 {
   error Escrow_NoAdmin();
 
   /**
+   * @notice Throws if the default-admin transfer delay exceeds the safe maximum
+   */
+  error Escrow_InvalidAdminTransferDelay();
+
+  /**
    * @notice Throws if a required address parameter is the zero address
    */
   error Escrow_ZeroAddress();
