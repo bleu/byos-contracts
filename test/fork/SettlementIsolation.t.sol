@@ -160,7 +160,7 @@ contract SettlementIsolationTest is Test {
     bytes memory signature
   ) internal {
     vm.prank(address(SETTLEMENT), solver);
-    trampoline.execute(proposal, route, address(bufferToken), address(bufferToken), signature);
+    trampoline.execute(proposal, route, address(bufferToken), signature);
   }
 
   /// @dev Runs a real, successful `settle()` whose single intra-interaction drives the
@@ -182,7 +182,7 @@ contract SettlementIsolationTest is Test {
       target: address(trampoline),
       value: 0,
       callData: abi.encodeCall(
-        ITrampoline.execute, (proposal, route, address(bufferToken), address(bufferToken), signature)
+        ITrampoline.execute, (proposal, route, address(bufferToken), signature)
       )
     });
 

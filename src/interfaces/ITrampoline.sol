@@ -197,19 +197,17 @@ interface ITrampoline {
    * off-chain against the sub-solver's escrow. Routes are expected to deliver
    * buy-token output directly to the settlement. Tokens remaining on the instance
    * after execution (unconsumed sell tokens, intermediate dust) are reclaimable by
-   * the sub-solver via `claimToken`/`claimTokens`. The tokens are BYOS-supplied call
-   * parameters taken from the order, not signed proposal fields. When `_buyToken` is
-   * BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
+   * the sub-solver via `claimToken`/`claimTokens`. The buy token is a BYOS-supplied
+   * call parameter taken from the order, not a signed proposal field. When `_buyToken`
+   * is BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
    * @param _proposal The signed proposal fields
    * @param _interactions The route, hashed into the verified signature
-   * @param _sellToken The trade's sell token (unused in execute, retained for interface compatibility)
    * @param _buyToken The trade's buy token; BUY_ETH_ADDRESS for native ETH
    * @param _signature Sub-solver's EIP-712 signature over the proposal
    */
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
-    address _sellToken,
     address _buyToken,
     bytes calldata _signature
   ) external;

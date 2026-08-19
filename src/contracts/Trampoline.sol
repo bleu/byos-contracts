@@ -57,7 +57,6 @@ contract Trampoline is ITrampoline {
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
-    address,
     address _buyToken,
     bytes calldata _signature
   ) external {

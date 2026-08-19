@@ -323,7 +323,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _sellToken, _buyToken, sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _buyToken, sig))
     });
 
     vm.prank(solver, solver);
@@ -354,7 +354,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(USDC), address(WETH), sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(WETH), sig))
     });
     interactions[1][2] = ITrampoline.Interaction({
       target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (_quotedWeth))
@@ -500,7 +500,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _sellToken, _buyToken, sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _buyToken, sig))
     });
 
     vm.prank(solver, solver);
