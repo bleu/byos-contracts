@@ -107,6 +107,16 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
 
   // --- Admin-only ---
 
+  /// @dev Prevents renouncing OPERATOR_ROLE or DEFAULT_ADMIN_ROLE while the
+  /// contract is paused, preserving the ability to unpause.
+  function renounceRole(
+    bytes32 _role,
+    address _callerConfirmation
+  ) public override {
+    if (paused && (_role == OPERATOR_ROLE || _role == DEFAULT_ADMIN_ROLE)) revert Escrow_EnforcedPause();
+    super.renounceRole(_role, _callerConfirmation);
+  }
+
   /// @inheritdoc IEscrow
   function setCooldownPeriod(
     uint256 _period
