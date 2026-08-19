@@ -121,6 +121,11 @@ interface IEscrow is IERC20 {
   error Escrow_CooldownNotElapsed();
 
   /**
+   * @notice Throws if the withdrawal cooldown period exceeds the maximum allowed duration
+   */
+  error Escrow_CooldownPeriodTooLong();
+
+  /**
    * @notice Throws if the sub-solver is frozen
    */
   error Escrow_AccountFrozen();

@@ -12,6 +12,8 @@ import {ITrampolineFactory} from 'interfaces/ITrampolineFactory.sol';
 import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
 contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
+  uint256 private constant _MAX_COOLDOWN_PERIOD = 30 days;
+
   /// @inheritdoc IEscrow
   bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
 
@@ -63,6 +65,7 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
     string memory _symbol
   ) ERC20(_name, _symbol) AccessControlDefaultAdminRules(_adminTransferDelay, _admin) {
     if (_settlement == address(0)) revert Escrow_ZeroAddress();
+    if (_cooldownPeriod > _MAX_COOLDOWN_PERIOD) revert Escrow_CooldownPeriodTooLong();
     _grantRole(OPERATOR_ROLE, _operator);
     for (uint256 _i = 0; _i < _submitters.length; ++_i) {
       _grantRole(SUBMITTER_ROLE, _submitters[_i]);
@@ -108,6 +111,7 @@ contract Escrow is ERC20, AccessControlDefaultAdminRules, IEscrow {
   function setCooldownPeriod(
     uint256 _period
   ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    if (_period > _MAX_COOLDOWN_PERIOD) revert Escrow_CooldownPeriodTooLong();
     uint256 _oldPeriod = cooldownPeriod;
     cooldownPeriod = _period;
     emit CooldownPeriodUpdated(_oldPeriod, _period);
