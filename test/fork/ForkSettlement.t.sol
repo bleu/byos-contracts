@@ -288,9 +288,7 @@ contract ForkSettlementTest is Test {
     interactions[1][0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (prop.data, prop.route, address(USDC), prop.signature)
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, address(USDC), prop.signature))
     });
 
     vm.prank(rival, rival);
@@ -348,9 +346,7 @@ contract ForkSettlementTest is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (prop.data, prop.route, address(WETH), prop.signature)
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, address(WETH), prop.signature))
     });
     interactions[1][2] =
       ITrampoline.Interaction({target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (quotedOut))});

@@ -519,9 +519,7 @@ contract TrampolineTest is Test {
     route[0] = ITrampoline.Interaction({
       target: address(other),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), '')
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), ''))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
@@ -538,9 +536,7 @@ contract TrampolineTest is Test {
     route[0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), '')
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), ''))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
