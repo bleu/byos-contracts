@@ -191,6 +191,8 @@ contract GasBenchmark is Test {
   }
 
   function _signProposal(
+    address _sellToken,
+    address _buyToken,
     uint256 _sellAmount,
     uint256 _buyAmount,
     ITrampoline.Interaction[] memory _route,
@@ -198,6 +200,8 @@ contract GasBenchmark is Test {
   ) internal view returns (ITrampoline.Proposal memory proposal_, bytes memory sig_) {
     proposal_ = ITrampoline.Proposal({
       orderUidHash: _orderUidHash,
+      sellToken: _sellToken,
+      buyToken: _buyToken,
       sellAmount: _sellAmount,
       minBuyAmount: _buyAmount,
       quoteBuyAmount: _buyAmount,
@@ -313,7 +317,7 @@ contract GasBenchmark is Test {
       _swapRoute(_sellToken, _buyToken, _sellAmount, _quotedOut, address(SETTLEMENT));
 
     (ITrampoline.Proposal memory proposal, bytes memory sig) =
-      _signProposal(_sellAmount, _quotedOut, route, keccak256('bench-settle'));
+      _signProposal(_sellToken, _buyToken, _sellAmount, _quotedOut, route, keccak256('bench-settle'));
 
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](2);
@@ -323,7 +327,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _buyToken, sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
 
     vm.prank(solver, solver);
@@ -343,7 +347,7 @@ contract GasBenchmark is Test {
 
     // Delta check tracks WETH growth on Settlement.
     (ITrampoline.Proposal memory proposal, bytes memory sig) =
-      _signProposal(_sellAmount, _quotedWeth, route, keccak256('bench-settle-eth'));
+      _signProposal(address(USDC), address(WETH), _sellAmount, _quotedWeth, route, keccak256('bench-settle-eth'));
 
     // Settlement unwraps the WETH after execute returns.
     ITrampoline.Interaction[][3] memory interactions;
@@ -354,7 +358,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(WETH), sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
     interactions[1][2] = ITrampoline.Interaction({
       target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (_quotedWeth))
@@ -490,7 +494,7 @@ contract GasBenchmark is Test {
       _swapRouteExactOutput(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, address(SETTLEMENT));
 
     (ITrampoline.Proposal memory proposal, bytes memory sig) =
-      _signProposal(_maxSellAmount, _exactBuyAmount, route, keccak256('bench-buy'));
+      _signProposal(_sellToken, _buyToken, _maxSellAmount, _exactBuyAmount, route, keccak256('bench-buy'));
 
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](2);
@@ -500,7 +504,7 @@ contract GasBenchmark is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, _buyToken, sig))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
 
     vm.prank(solver, solver);

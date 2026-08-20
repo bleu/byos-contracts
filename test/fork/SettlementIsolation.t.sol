@@ -132,6 +132,8 @@ contract SettlementIsolationTest is Test {
   function _emptyProposal() internal view returns (ITrampoline.Proposal memory) {
     return ITrampoline.Proposal({
       orderUidHash: keccak256('isolation-order-uid'),
+      sellToken: address(bufferToken),
+      buyToken: address(bufferToken),
       sellAmount: 0,
       minBuyAmount: 0,
       quoteBuyAmount: 0,
@@ -160,7 +162,7 @@ contract SettlementIsolationTest is Test {
     bytes memory signature
   ) internal {
     vm.prank(address(SETTLEMENT), solver);
-    trampoline.execute(proposal, route, address(bufferToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   /// @dev Runs a real, successful `settle()` whose single intra-interaction drives the
@@ -181,7 +183,7 @@ contract SettlementIsolationTest is Test {
     interactions[1][0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, address(bufferToken), signature))
+      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, signature))
     });
 
     // msg.sender and tx.origin are both the submitter solver: the protocol's onlySolver

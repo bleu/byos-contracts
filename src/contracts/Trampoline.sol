@@ -57,7 +57,6 @@ contract Trampoline is ITrampoline {
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
-    address _buyToken,
     bytes calldata _signature
   ) external {
     if (msg.sender != SETTLEMENT) revert Trampoline_OnlySettlement();
@@ -75,7 +74,7 @@ contract Trampoline is ITrampoline {
 
     noncesUsed[_proposal.nonce] = true;
 
-    uint256 _buyBalanceBefore = _settlementBuyTokenBalance(_buyToken);
+    uint256 _buyBalanceBefore = _settlementBuyTokenBalance(_proposal.buyToken);
 
     for (uint256 _i = 0; _i < _interactions.length; ++_i) {
       Interaction calldata _interaction = _interactions[_i];
@@ -95,7 +94,7 @@ contract Trampoline is ITrampoline {
       }
     }
 
-    uint256 _delta = _settlementBuyTokenBalance(_buyToken) - _buyBalanceBefore;
+    uint256 _delta = _settlementBuyTokenBalance(_proposal.buyToken) - _buyBalanceBefore;
     if (_delta < _proposal.minBuyAmount) revert Trampoline_FloorNotMet(_delta, _proposal.minBuyAmount);
 
     emit Executed(_proposal.orderUidHash, _delta, _proposal.minBuyAmount, _proposal.quoteBuyAmount);
@@ -122,13 +121,15 @@ contract Trampoline is ITrampoline {
       let _ptr := mload(0x40)
       mstore(_ptr, _typeHash)
       mstore(add(_ptr, 0x20), calldataload(_proposal)) // orderUidHash
-      mstore(add(_ptr, 0x40), calldataload(add(_proposal, 0x20))) // sellAmount
-      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40))) // minBuyAmount
-      mstore(add(_ptr, 0x80), calldataload(add(_proposal, 0x60))) // quoteBuyAmount
-      mstore(add(_ptr, 0xa0), _interactionsHash)
-      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0x80))) // validUntil
-      mstore(add(_ptr, 0xe0), calldataload(add(_proposal, 0xa0))) // nonce
-      _structHash := keccak256(_ptr, 0x100)
+      mstore(add(_ptr, 0x40), calldataload(add(_proposal, 0x20))) // sellToken
+      mstore(add(_ptr, 0x60), calldataload(add(_proposal, 0x40))) // buyToken
+      mstore(add(_ptr, 0x80), calldataload(add(_proposal, 0x60))) // sellAmount
+      mstore(add(_ptr, 0xa0), calldataload(add(_proposal, 0x80))) // minBuyAmount
+      mstore(add(_ptr, 0xc0), calldataload(add(_proposal, 0xa0))) // quoteBuyAmount
+      mstore(add(_ptr, 0xe0), _interactionsHash)
+      mstore(add(_ptr, 0x100), calldataload(add(_proposal, 0xc0))) // validUntil
+      mstore(add(_ptr, 0x120), calldataload(add(_proposal, 0xe0))) // nonce
+      _structHash := keccak256(_ptr, 0x140)
     }
 
     bytes32 _digest;

@@ -70,6 +70,8 @@ contract TrampolineTest is Test {
   function _proposal() internal view returns (ITrampoline.Proposal memory) {
     return ITrampoline.Proposal({
       orderUidHash: keccak256('order-uid'),
+      sellToken: address(sellToken),
+      buyToken: address(buyToken),
       sellAmount: SELL_AMOUNT,
       minBuyAmount: BUY_AMOUNT,
       quoteBuyAmount: BUY_AMOUNT,
@@ -128,7 +130,7 @@ contract TrampolineTest is Test {
     emit ITrampoline.Executed(proposal.orderUidHash, BUY_AMOUNT + surplus, BUY_AMOUNT, BUY_AMOUNT);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     // Surplus lands in the settlement as BYOS-owned slippage (ADR-0008).
     // The route consumed all sell tokens; nothing remains on the instance.
@@ -147,7 +149,7 @@ contract TrampolineTest is Test {
 
     vm.prank(makeAddr('notSettlement'));
     vm.expectRevert(ITrampoline.Trampoline_OnlySettlement.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_reverts_when_tx_origin_not_a_submitter() public {
@@ -162,7 +164,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, makeAddr('rivalSolver'));
     vm.expectRevert(ITrampoline.Trampoline_UnauthorizedSubmitter.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_reverts_after_submitter_revoked() public {
@@ -179,7 +181,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_UnauthorizedSubmitter.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_accepts_newly_granted_submitter() public {
@@ -194,7 +196,7 @@ contract TrampolineTest is Test {
     escrow.grantRole(submitterRole, newSubmitter);
 
     vm.prank(settlement, newSubmitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
   }
@@ -228,7 +230,7 @@ contract TrampolineTest is Test {
 
       sellToken.mint(address(instance), SELL_AMOUNT);
       vm.prank(settlement, submitters[i]);
-      instance.execute(proposal, route, address(buyToken), signature);
+      instance.execute(proposal, route, signature);
     }
 
     assertEq(buyToken.balanceOf(settlement), submitters.length * BUY_AMOUNT);
@@ -244,7 +246,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_ProposalExpired.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   // --- Signature verification ---
@@ -258,7 +260,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_reverts_when_interactions_differ_from_signed() public {
@@ -272,7 +274,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
-    trampoline.execute(proposal, substituted, address(buyToken), signature);
+    trampoline.execute(proposal, substituted, signature);
   }
 
   function test_execute_reverts_when_signed_amounts_tampered() public {
@@ -285,7 +287,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   // --- Funding guard: floor, sweep, delta check (ADR-0003 / ADR-0008) ---
@@ -310,7 +312,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     if (output >= minBuyAmount) {
-      trampoline.execute(proposal, route, address(buyToken), signature);
+      trampoline.execute(proposal, route, signature);
 
       assertEq(buyToken.balanceOf(settlement), output);
       assertEq(buyToken.balanceOf(address(trampoline)), 0);
@@ -318,7 +320,7 @@ contract TrampolineTest is Test {
       // Expect the delta-check error with its exact arguments, so an unrelated
       // revert (e.g. in the route) cannot make this branch pass.
       vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, output, minBuyAmount));
-      trampoline.execute(proposal, route, address(buyToken), signature);
+      trampoline.execute(proposal, route, signature);
     }
   }
 
@@ -342,7 +344,7 @@ contract TrampolineTest is Test {
     emit ITrampoline.Executed(proposal.orderUidHash, delivered, minBuy, maxBuy);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(buyToken.balanceOf(settlement), delivered);
   }
@@ -363,7 +365,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, delivered, minBuy));
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_buy_order_leaves_unconsumed_sell_token_on_instance() public {
@@ -377,7 +379,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
     assertEq(buyToken.balanceOf(address(trampoline)), 0);
@@ -397,7 +399,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
     assertEq(buyToken.balanceOf(address(trampoline)), 0);
@@ -416,7 +418,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(Reverter.Boom.selector, 42));
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   // --- Native ETH ---
@@ -437,10 +439,11 @@ contract TrampolineTest is Test {
     });
     route[1] = ITrampoline.Interaction({target: settlement, value: BUY_AMOUNT + surplus, callData: ''});
     ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = BUY_ETH_ADDRESS;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, BUY_ETH_ADDRESS, signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(settlement.balance, BUY_AMOUNT + surplus);
     assertEq(address(trampoline).balance, 0);
@@ -458,11 +461,12 @@ contract TrampolineTest is Test {
     });
     route[1] = ITrampoline.Interaction({target: settlement, value: BUY_AMOUNT - 1, callData: ''});
     ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = BUY_ETH_ADDRESS;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, BUY_AMOUNT - 1, BUY_AMOUNT));
-    trampoline.execute(proposal, route, BUY_ETH_ADDRESS, signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_execute_passes_value_in_interactions() public {
@@ -479,10 +483,11 @@ contract TrampolineTest is Test {
       target: address(weth), value: 0, callData: abi.encodeCall(IERC20.transfer, (settlement, BUY_AMOUNT))
     });
     ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = address(weth);
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(weth), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(weth.balanceOf(settlement), BUY_AMOUNT);
     assertEq(address(trampoline).balance, 0);
@@ -499,14 +504,14 @@ contract TrampolineTest is Test {
 
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
     assertTrue(trampoline.noncesUsed(proposal.nonce));
 
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   // --- Isolation between instances ---
@@ -519,7 +524,7 @@ contract TrampolineTest is Test {
     route[0] = ITrampoline.Interaction({
       target: address(other),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), ''))
+      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, ''))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
@@ -527,7 +532,7 @@ contract TrampolineTest is Test {
     // The inner execute rejects the trampoline as caller; the revert bubbles up.
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_OnlySettlement.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_route_cannot_reenter_own_execute() public {
@@ -536,14 +541,14 @@ contract TrampolineTest is Test {
     route[0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, address(buyToken), ''))
+      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, ''))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_OnlySettlement.selector);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_planted_approval_cannot_reach_other_instances_residue() public {
@@ -567,7 +572,7 @@ contract TrampolineTest is Test {
     proposal.quoteBuyAmount = 0;
     bytes memory signature = _sign(subSolverKey, proposal, route);
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     // The approval stands (approvals are not reset, ADR-0001) but instance A is
     // empty, and it grants nothing over instance B's residue.
@@ -610,7 +615,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
-    instance2.execute(proposal, route, address(buyToken), signature);
+    instance2.execute(proposal, route, signature);
   }
 
   // --- Threat analysis coverage (docs/security/threat-analysis.md) ---
@@ -633,7 +638,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(buyToken.balanceOf(settlement), 0);
     assertEq(sellToken.balanceOf(sink), SELL_AMOUNT);
@@ -658,7 +663,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
-    zeroTrampoline.execute(proposal, route, address(buyToken), garbage);
+    zeroTrampoline.execute(proposal, route, garbage);
   }
 
   function test_execute_does_not_enforce_signed_sellAmount() public {
@@ -674,7 +679,7 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
   }
 
@@ -689,7 +694,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert();
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_sell_tokens_stay_on_trampoline_after_execute() public {
@@ -706,27 +711,28 @@ contract TrampolineTest is Test {
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
 
     assertEq(sellToken.balanceOf(address(trampoline)), SELL_AMOUNT);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
   }
 
-  function test_wrong_buyToken_causes_delta_check_revert() public {
-    // Threat 9: _buyToken is unsigned — BYOS supplies it. If BYOS passes a
-    // different _buyToken, the delta check measures the wrong token's balance
-    // growth. Since the route doesn't produce the wrong token, the delta is 0.
+  function test_wrong_buyToken_in_proposal_causes_delta_check_revert() public {
+    // buyToken is now a signed proposal field. A sub-solver that signs the wrong
+    // buyToken gets a valid signature, but the delta check measures the wrong
+    // token's balance growth. Since the route doesn't produce that token, delta is 0.
     sellToken.mint(address(trampoline), SELL_AMOUNT);
-
-    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
-    ITrampoline.Proposal memory proposal = _proposal();
-    bytes memory signature = _sign(subSolverKey, proposal, route);
 
     TestERC20 wrongBuyToken = new TestERC20();
 
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = address(wrongBuyToken);
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, 0, BUY_AMOUNT));
-    trampoline.execute(proposal, route, address(wrongBuyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_fee_on_transfer_buyToken_delta_accounts_for_fee() public {
@@ -753,17 +759,19 @@ contract TrampolineTest is Test {
     // minBuyAmount <= netReceived → succeeds
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = address(feeToken);
     proposal.minBuyAmount = netReceived;
     proposal.quoteBuyAmount = netReceived;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(feeToken), signature);
+    trampoline.execute(proposal, route, signature);
     assertEq(feeToken.balanceOf(settlement), netReceived);
 
     // minBuyAmount == routeOutput (> netReceived) → reverts
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Proposal memory proposal2 = _proposal();
+    proposal2.buyToken = address(feeToken);
     proposal2.minBuyAmount = routeOutput;
     proposal2.quoteBuyAmount = routeOutput;
     proposal2.nonce = 1;
@@ -771,7 +779,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, netReceived, routeOutput));
-    trampoline.execute(proposal2, route, address(feeToken), sig2);
+    trampoline.execute(proposal2, route, sig2);
   }
 
   // --- Residue claim (ADR-0008) ---
@@ -886,7 +894,7 @@ contract TrampolineTest is Test {
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, 0, BUY_AMOUNT));
-    trampoline.execute(proposal, route, address(buyToken), signature);
+    trampoline.execute(proposal, route, signature);
   }
 
   function test_route_calling_escrow_deposit_reverts_atomically() public {
@@ -910,11 +918,12 @@ contract TrampolineTest is Test {
     });
 
     ITrampoline.Proposal memory proposal = _proposal();
+    proposal.buyToken = BUY_ETH_ADDRESS;
     bytes memory signature = _sign(subSolverKey, proposal, route);
 
     vm.prank(settlement, submitter);
     vm.expectRevert(abi.encodeWithSelector(ITrampoline.Trampoline_FloorNotMet.selector, 0, BUY_AMOUNT));
-    trampoline.execute(proposal, route, BUY_ETH_ADDRESS, signature);
+    trampoline.execute(proposal, route, signature);
 
     // Atomic revert: escrow deposit was rolled back
     assertEq(escrow.balanceOf(attackerAddr), 0);
@@ -937,7 +946,7 @@ contract TrampolineTest is Test {
     // Original signature
     bytes memory originalSig = abi.encodePacked(r, s, v);
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal, route, address(buyToken), originalSig);
+    trampoline.execute(proposal, route, originalSig);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
 
     // Malleable counterpart — blocked by nonce replay, not signature failure
@@ -948,7 +957,7 @@ contract TrampolineTest is Test {
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
-    trampoline.execute(proposal, route, address(buyToken), malleableSig);
+    trampoline.execute(proposal, route, malleableSig);
   }
 
   function test_double_execute_sequential_has_independent_deltas() public {
@@ -963,7 +972,7 @@ contract TrampolineTest is Test {
     bytes memory sig1 = _sign(subSolverKey, proposal1, route1);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal1, route1, address(buyToken), sig1);
+    trampoline.execute(proposal1, route1, sig1);
     assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
 
     // Second execute — delta check starts from the new baseline
@@ -974,7 +983,7 @@ contract TrampolineTest is Test {
     bytes memory sig2 = _sign(subSolverKey, proposal2, route2);
 
     vm.prank(settlement, submitter);
-    trampoline.execute(proposal2, route2, address(buyToken), sig2);
+    trampoline.execute(proposal2, route2, sig2);
     assertEq(buyToken.balanceOf(settlement), 2 * BUY_AMOUNT);
   }
 }
