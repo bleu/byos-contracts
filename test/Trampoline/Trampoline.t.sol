@@ -522,9 +522,7 @@ contract TrampolineTest is Test {
     ITrampoline.Interaction[] memory innerRoute = new ITrampoline.Interaction[](0);
     ITrampoline.Interaction[] memory route = new ITrampoline.Interaction[](1);
     route[0] = ITrampoline.Interaction({
-      target: address(other),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, ''))
+      target: address(other), value: 0, callData: abi.encodeCall(ITrampoline.execute, (_proposal(), innerRoute, ''))
     });
     ITrampoline.Proposal memory proposal = _proposal();
     bytes memory signature = _sign(subSolverKey, proposal, route);

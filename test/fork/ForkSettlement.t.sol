@@ -242,8 +242,13 @@ contract ForkSettlementTest is Test {
     // sit below it, so the sweep hands the settlement more than it pays the user.
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
     uint256 clearingOut = quotedOut * 99 / 100;
-    SignedProposal memory prop =
-      _signProposal(address(WETH), address(USDC), sellAmount, clearingOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
+    SignedProposal memory prop = _signProposal(
+      address(WETH),
+      address(USDC),
+      sellAmount,
+      clearingOut,
+      _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut)
+    );
 
     uint256 settlementWethBefore = WETH.balanceOf(address(SETTLEMENT));
     uint256 settlementUsdcBefore = USDC.balanceOf(address(SETTLEMENT));
@@ -276,8 +281,13 @@ contract ForkSettlementTest is Test {
     vm.stopPrank();
 
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
-    SignedProposal memory prop =
-      _signProposal(address(WETH), address(USDC), sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
+    SignedProposal memory prop = _signProposal(
+      address(WETH),
+      address(USDC),
+      sellAmount,
+      quotedOut,
+      _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut)
+    );
 
     // BYOS settles the proposal; from here on its calldata is public.
     _settleOrder(address(WETH), address(USDC), sellAmount, quotedOut, prop);

@@ -181,9 +181,7 @@ contract SettlementIsolationTest is Test {
     ITrampoline.Interaction[][3] memory interactions;
     interactions[1] = new ITrampoline.Interaction[](1);
     interactions[1][0] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, signature))
+      target: address(trampoline), value: 0, callData: abi.encodeCall(ITrampoline.execute, (proposal, route, signature))
     });
 
     // msg.sender and tx.origin are both the submitter solver: the protocol's onlySolver

@@ -325,9 +325,7 @@ contract GasBenchmark is Test {
       target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
+      target: address(trampoline), value: 0, callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
 
     vm.prank(solver, solver);
@@ -356,9 +354,7 @@ contract GasBenchmark is Test {
       target: address(USDC), value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _sellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
+      target: address(trampoline), value: 0, callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
     interactions[1][2] = ITrampoline.Interaction({
       target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (_quotedWeth))
@@ -502,9 +498,7 @@ contract GasBenchmark is Test {
       target: _sellToken, value: 0, callData: abi.encodeCall(IERC20.transfer, (address(trampoline), _maxSellAmount))
     });
     interactions[1][1] = ITrampoline.Interaction({
-      target: address(trampoline),
-      value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
+      target: address(trampoline), value: 0, callData: abi.encodeCall(ITrampoline.execute, (proposal, route, sig))
     });
 
     vm.prank(solver, solver);
