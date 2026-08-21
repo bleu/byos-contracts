@@ -47,7 +47,14 @@ contract AccessControlTest is EscrowTestBase {
 
   function test_constructor_accepts_max_cooldown_period() public {
     Escrow e = new Escrow(
-      ADMIN_TRANSFER_DELAY, admin, op, _soloSubmitters(submitter), 30 days, makeAddr('settlement'), 'BYOS Escrow', 'BYOS'
+      ADMIN_TRANSFER_DELAY,
+      admin,
+      op,
+      _soloSubmitters(submitter),
+      30 days,
+      makeAddr('settlement'),
+      'BYOS Escrow',
+      'BYOS'
     );
     assertEq(e.cooldownPeriod(), 30 days);
   }
