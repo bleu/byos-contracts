@@ -9,12 +9,12 @@ address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
 /**
  * @dev EIP-712 type hash of the signed proposal struct. The type name "ProposalData"
- * and its seven fields are fixed by ADR-0005 and baked into every sub-solver signature —
+ * and its nine fields are fixed by ADR-0005 and baked into every sub-solver signature —
  * renaming the Solidity struct (`Proposal`, which omits the derived interactionsHash
  * field) is safe, but changing this string invalidates all outstanding signatures.
  */
 bytes32 constant PROPOSAL_TYPEHASH = keccak256(
-  'ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 quoteBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
+  'ProposalData(bytes32 orderUidHash,address sellToken,address buyToken,uint256 sellAmount,uint256 minBuyAmount,uint256 quoteBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)'
 );
 
 /**
@@ -71,6 +71,10 @@ interface ITrampoline {
    * @notice The signed proposal fields (ADR-0005), minus interactionsHash which is
    * recomputed on-chain from the interactions actually being executed
    * @param orderUidHash Hash of the CoW order UID the proposal settles
+   * @param sellToken The trade's sell token address, signed to prevent cross-pair reuse
+   * @param buyToken The trade's buy token address; used for the balance-delta check and
+   * signed to prevent a signature from being reused with an unrelated measurement token.
+   * Use BUY_ETH_ADDRESS for native ETH.
    * @param sellAmount The sell amount pushed into the instance for the route
    * @param minBuyAmount The floor: the minimum growth of the settlement's buy-token
    * balance execute enforces. The delta check reverts when actual growth is below this.
@@ -83,6 +87,8 @@ interface ITrampoline {
    */
   struct Proposal {
     bytes32 orderUidHash;
+    address sellToken;
+    address buyToken;
     uint256 sellAmount;
     uint256 minBuyAmount;
     uint256 quoteBuyAmount;
@@ -197,20 +203,16 @@ interface ITrampoline {
    * off-chain against the sub-solver's escrow. Routes are expected to deliver
    * buy-token output directly to the settlement. Tokens remaining on the instance
    * after execution (unconsumed sell tokens, intermediate dust) are reclaimable by
-   * the sub-solver via `claimToken`/`claimTokens`. The tokens are BYOS-supplied call
-   * parameters taken from the order, not signed proposal fields. When `_buyToken` is
-   * BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
-   * @param _proposal The signed proposal fields
+   * the sub-solver via `claimToken`/`claimTokens`. Both trade tokens are signed
+   * proposal fields, binding the signature to a specific token pair. When
+   * `_proposal.buyToken` is BUY_ETH_ADDRESS the snapshot and delta are in native ETH.
+   * @param _proposal The signed proposal fields (includes sellToken and buyToken)
    * @param _interactions The route, hashed into the verified signature
-   * @param _sellToken The trade's sell token (unused in execute, retained for interface compatibility)
-   * @param _buyToken The trade's buy token; BUY_ETH_ADDRESS for native ETH
    * @param _signature Sub-solver's EIP-712 signature over the proposal
    */
   function execute(
     Proposal calldata _proposal,
     Interaction[] calldata _interactions,
-    address _sellToken,
-    address _buyToken,
     bytes calldata _signature
   ) external;
 

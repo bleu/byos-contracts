@@ -29,6 +29,8 @@ contract Eip712Vectors is Test {
 
   struct Inputs {
     bytes orderUid;
+    address sellToken;
+    address buyToken;
     uint256 sellAmount;
     uint256 minBuyAmount;
     uint256 quoteBuyAmount;
@@ -51,6 +53,8 @@ contract Eip712Vectors is Test {
     // Vector 1: empty route. Isolates domain + typehash from interaction encoding.
     _cases[0] = Inputs({
       orderUid: bytes.concat(bytes28(0), bytes20(_subSolver), bytes8(0)),
+      sellToken: 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, // WETH
+      buyToken: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, // USDC
       sellAmount: 1e18,
       minBuyAmount: 5e6,
       quoteBuyAmount: 5e6,
@@ -62,6 +66,8 @@ contract Eip712Vectors is Test {
     // Vector 2: single zero-value interaction. Isolates the encoding of one struct.
     _cases[1] = Inputs({
       orderUid: bytes.concat(bytes28(uint224(1)), bytes20(_subSolver), bytes8(uint64(7))),
+      sellToken: 0x6B175474E89094C44Da98b954EedeAC495271d0F, // DAI
+      buyToken: 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, // WETH
       sellAmount: 123_456_789,
       minBuyAmount: 900_000_000,
       quoteBuyAmount: 987_654_321,
@@ -76,6 +82,8 @@ contract Eip712Vectors is Test {
     // values. Exercises the dynamic-array offsets in abi.encode(_interactions).
     _cases[2] = Inputs({
       orderUid: bytes.concat(bytes28(type(uint224).max), bytes20(_subSolver), bytes8(type(uint64).max)),
+      sellToken: address(type(uint160).max), // 0xFFFF...FFFF
+      buyToken: 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE, // BUY_ETH_ADDRESS
       sellAmount: type(uint256).max,
       minBuyAmount: 1,
       quoteBuyAmount: 1,
@@ -116,6 +124,8 @@ contract Eip712Vectors is Test {
   ) internal view returns (string memory _json) {
     ITrampoline.Proposal memory _proposal = ITrampoline.Proposal({
       orderUidHash: keccak256(_inputs.orderUid),
+      sellToken: _inputs.sellToken,
+      buyToken: _inputs.buyToken,
       sellAmount: _inputs.sellAmount,
       minBuyAmount: _inputs.minBuyAmount,
       quoteBuyAmount: _inputs.quoteBuyAmount,
@@ -129,6 +139,8 @@ contract Eip712Vectors is Test {
     assert(ECDSA.recover(_digest, _signature) == _subSolver);
 
     _json = string.concat('{"orderUid":"', vm.toString(_inputs.orderUid), '"');
+    _json = string.concat(_json, ',"sellToken":"', vm.toString(_inputs.sellToken), '"');
+    _json = string.concat(_json, ',"buyToken":"', vm.toString(_inputs.buyToken), '"');
     _json = string.concat(_json, ',"sellAmount":"', vm.toString(_inputs.sellAmount), '"');
     _json = string.concat(_json, ',"minBuyAmount":"', vm.toString(_inputs.minBuyAmount), '"');
     _json = string.concat(_json, ',"quoteBuyAmount":"', vm.toString(_inputs.quoteBuyAmount), '"');
@@ -150,6 +162,8 @@ contract Eip712Vectors is Test {
       abi.encode(
         PROPOSAL_TYPEHASH,
         _proposal.orderUidHash,
+        _proposal.sellToken,
+        _proposal.buyToken,
         _proposal.sellAmount,
         _proposal.minBuyAmount,
         _proposal.quoteBuyAmount,

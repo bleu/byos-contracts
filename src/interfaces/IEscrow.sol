@@ -121,6 +121,11 @@ interface IEscrow is IERC20 {
   error Escrow_CooldownNotElapsed();
 
   /**
+   * @notice Throws if the withdrawal cooldown period exceeds the maximum allowed duration
+   */
+  error Escrow_CooldownPeriodTooLong();
+
+  /**
    * @notice Throws if the sub-solver is frozen
    */
   error Escrow_AccountFrozen();
@@ -159,6 +164,11 @@ interface IEscrow is IERC20 {
    * @notice Throws if the default admin has been renounced
    */
   error Escrow_NoAdmin();
+
+  /**
+   * @notice Throws if the default-admin transfer delay exceeds the safe maximum
+   */
+  error Escrow_InvalidAdminTransferDelay();
 
   /**
    * @notice Throws if a required address parameter is the zero address

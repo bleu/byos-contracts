@@ -126,12 +126,16 @@ contract ForkSettlementTest is Test {
   }
 
   function _signProposal(
+    address sellToken,
+    address buyToken,
     uint256 sellAmount,
     uint256 buyAmount,
     ITrampoline.Interaction[] memory route
   ) internal view returns (SignedProposal memory signed) {
     signed.data = ITrampoline.Proposal({
       orderUidHash: keccak256('fork-order-uid'),
+      sellToken: sellToken,
+      buyToken: buyToken,
       sellAmount: sellAmount,
       minBuyAmount: buyAmount,
       quoteBuyAmount: buyAmount,
@@ -214,7 +218,7 @@ contract ForkSettlementTest is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, sellToken, buyToken, prop.signature))
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, prop.signature))
     });
 
     // A solver submits settle() from its own EOA: msg.sender and tx.origin are both it.
@@ -238,8 +242,13 @@ contract ForkSettlementTest is Test {
     // sit below it, so the sweep hands the settlement more than it pays the user.
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
     uint256 clearingOut = quotedOut * 99 / 100;
-    SignedProposal memory prop =
-      _signProposal(sellAmount, clearingOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
+    SignedProposal memory prop = _signProposal(
+      address(WETH),
+      address(USDC),
+      sellAmount,
+      clearingOut,
+      _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut)
+    );
 
     uint256 settlementWethBefore = WETH.balanceOf(address(SETTLEMENT));
     uint256 settlementUsdcBefore = USDC.balanceOf(address(SETTLEMENT));
@@ -272,8 +281,13 @@ contract ForkSettlementTest is Test {
     vm.stopPrank();
 
     uint256 quotedOut = _quote(address(WETH), address(USDC), sellAmount);
-    SignedProposal memory prop =
-      _signProposal(sellAmount, quotedOut, _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut));
+    SignedProposal memory prop = _signProposal(
+      address(WETH),
+      address(USDC),
+      sellAmount,
+      quotedOut,
+      _swapRoute(address(WETH), address(USDC), sellAmount, quotedOut)
+    );
 
     // BYOS settles the proposal; from here on its calldata is public.
     _settleOrder(address(WETH), address(USDC), sellAmount, quotedOut, prop);
@@ -288,9 +302,7 @@ contract ForkSettlementTest is Test {
     interactions[1][0] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (prop.data, prop.route, address(WETH), address(USDC), prop.signature)
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, prop.signature))
     });
 
     vm.prank(rival, rival);
@@ -311,7 +323,7 @@ contract ForkSettlementTest is Test {
     // Route sends WETH to Settlement; the delta check tracks WETH growth. A
     // post-execute interaction unwraps the WETH so Settlement can pay in ETH.
     ITrampoline.Interaction[] memory route = _swapRoute(address(USDC), address(WETH), sellAmount, quotedOut);
-    SignedProposal memory prop = _signProposal(sellAmount, clearingOut, route);
+    SignedProposal memory prop = _signProposal(address(USDC), address(WETH), sellAmount, clearingOut, route);
 
     uint256 userEthBefore = user.balance;
     uint256 settlementEthBefore = address(SETTLEMENT).balance;
@@ -348,9 +360,7 @@ contract ForkSettlementTest is Test {
     interactions[1][1] = ITrampoline.Interaction({
       target: address(trampoline),
       value: 0,
-      callData: abi.encodeCall(
-        ITrampoline.execute, (prop.data, prop.route, address(USDC), address(WETH), prop.signature)
-      )
+      callData: abi.encodeCall(ITrampoline.execute, (prop.data, prop.route, prop.signature))
     });
     interactions[1][2] =
       ITrampoline.Interaction({target: address(WETH), value: 0, callData: abi.encodeCall(IWETH.withdraw, (quotedOut))});

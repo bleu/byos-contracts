@@ -17,6 +17,8 @@ library ProposalSigning {
       abi.encode(
         PROPOSAL_TYPEHASH,
         proposal.orderUidHash,
+        proposal.sellToken,
+        proposal.buyToken,
         proposal.sellAmount,
         proposal.minBuyAmount,
         proposal.quoteBuyAmount,
