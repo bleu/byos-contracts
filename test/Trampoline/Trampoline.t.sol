@@ -290,6 +290,32 @@ contract TrampolineTest is Test {
     trampoline.execute(proposal, route, signature);
   }
 
+  function test_execute_reverts_when_sell_token_tampered() public {
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    proposal.sellToken = makeAddr('otherSellToken');
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    trampoline.execute(proposal, route, signature);
+  }
+
+  function test_execute_reverts_when_buy_token_tampered() public {
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    proposal.buyToken = makeAddr('otherBuyToken');
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    trampoline.execute(proposal, route, signature);
+  }
+
   // --- Funding guard: floor, sweep, delta check (ADR-0003 / ADR-0008) ---
 
   /// @dev The funding-guard property (ADR-0003) over fuzzed amounts: execute succeeds

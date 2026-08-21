@@ -134,6 +134,35 @@ contract PauseTest is EscrowTestBase {
     escrow.transfer(subSolver2, 1 ether);
   }
 
+  // --- renounceRole while paused ---
+
+  function test_renounceOperatorRole_reverts_when_paused() public {
+    vm.prank(op);
+    escrow.pause();
+
+    vm.prank(op);
+    vm.expectRevert(IEscrow.Escrow_EnforcedPause.selector);
+    escrow.renounceRole(OPERATOR_ROLE, op);
+  }
+
+  function test_renounceAdminRole_reverts_when_paused() public {
+    vm.prank(op);
+    escrow.pause();
+
+    vm.prank(admin);
+    vm.expectRevert(IEscrow.Escrow_EnforcedPause.selector);
+    escrow.renounceRole(ADMIN_ROLE, admin);
+  }
+
+  function test_renounceSubmitterRole_allowed_when_paused() public {
+    vm.prank(op);
+    escrow.pause();
+
+    vm.prank(submitter);
+    escrow.renounceRole(SUBMITTER_ROLE, submitter);
+    assertFalse(escrow.hasRole(SUBMITTER_ROLE, submitter));
+  }
+
   // --- Events ---
 
   function test_pause_emits_event() public {

@@ -9,7 +9,7 @@ address constant BUY_ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
 /**
  * @dev EIP-712 type hash of the signed proposal struct. The type name "ProposalData"
- * and its seven fields are fixed by ADR-0005 and baked into every sub-solver signature —
+ * and its nine fields are fixed by ADR-0005 and baked into every sub-solver signature —
  * renaming the Solidity struct (`Proposal`, which omits the derived interactionsHash
  * field) is safe, but changing this string invalidates all outstanding signatures.
  */

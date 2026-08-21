@@ -45,6 +45,27 @@ contract AccessControlTest is EscrowTestBase {
     new Escrow(ADMIN_TRANSFER_DELAY, admin, op, _soloSubmitters(submitter), COOLDOWN, address(0), 'BYOS Escrow', 'BYOS');
   }
 
+  function test_constructor_accepts_max_cooldown_period() public {
+    Escrow e = new Escrow(
+      ADMIN_TRANSFER_DELAY, admin, op, _soloSubmitters(submitter), 30 days, makeAddr('settlement'), 'BYOS Escrow', 'BYOS'
+    );
+    assertEq(e.cooldownPeriod(), 30 days);
+  }
+
+  function test_constructor_reverts_when_cooldown_period_too_long() public {
+    vm.expectRevert(IEscrow.Escrow_CooldownPeriodTooLong.selector);
+    new Escrow(
+      ADMIN_TRANSFER_DELAY,
+      admin,
+      op,
+      _soloSubmitters(submitter),
+      30 days + 1,
+      makeAddr('settlement'),
+      'BYOS Escrow',
+      'BYOS'
+    );
+  }
+
   // --- Admin functions ---
 
   function test_set_cooldown_period() public {
@@ -122,6 +143,18 @@ contract AccessControlTest is EscrowTestBase {
       abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, subSolver, ADMIN_ROLE)
     );
     escrow.beginDefaultAdminTransfer(subSolver);
+  }
+
+  function test_setCooldownPeriod_accepts_max_cooldown_period() public {
+    vm.prank(admin);
+    escrow.setCooldownPeriod(30 days);
+    assertEq(escrow.cooldownPeriod(), 30 days);
+  }
+
+  function test_setCooldownPeriod_reverts_when_period_too_long() public {
+    vm.prank(admin);
+    vm.expectRevert(IEscrow.Escrow_CooldownPeriodTooLong.selector);
+    escrow.setCooldownPeriod(30 days + 1);
   }
 
   function test_setCooldownPeriod_reverts_non_admin() public {
