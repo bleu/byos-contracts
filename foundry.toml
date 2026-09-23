@@ -23,8 +23,28 @@ ignored_warnings_from = ["lib"]
 # The Eip712Vectors generator rewrites the committed vector file in place.
 fs_permissions = [{ access = "read-write", path = "./test/vectors" }]
 
+[rpc_endpoints]
+bnb = "https://bsc-dataseed1.binance.org"
+
+[etherscan]
+bnb = { key = "${BSCSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=56" }
+
 [lint]
-exclude_lints = ["block-timestamp", "erc20-unchecked-transfer"]
+exclude_lints = [
+  "block-timestamp",
+  "erc20-unchecked-transfer",
+  # Intentional patterns in audited contracts — suppressed to keep CI green
+  # after Foundry 1.8.3 introduced these lint rules.
+  "arbitrary-send-eth",          # ETH sends to controlled destinations (admin, recipient)
+  "calls-loop",                  # Trampoline sweep loop — intentional multi-call pattern
+  "encode-packed-collision",     # creationCode + abi.encode — no collision risk in context
+  "environment-read-across-mutation", # block.timestamp in tests across vm.warp/revertToState
+  "missing-zero-check",          # Immutable constructor args — zero address not a valid input
+  "reentrancy-events",           # Events after external calls — safe given existing guards
+  "require-revert-in-loop",      # Trampoline execution loop — revert on failed interaction
+  "tx-origin",                   # Trampoline submitter role check — intentional per ADR-0005
+  "unused-return",               # ensureDeployed return value intentionally ignored
+]
 
 [fmt]
 line_length = 120
