@@ -53,14 +53,7 @@ MAINNET_RPC_URL= forge test                    # skip fork tests
 
 ### Deploy
 
-```bash
-ESCROW_ADMIN=<address> ESCROW_OPERATOR=<address> BYOS_SUBMITTERS=<addr1>,<addr2> \
-  forge script script/Deploy.s.sol --broadcast
-```
-
-Deploys the TrampolineFactory and the Escrow wired to it. See
-[`script/Deploy.s.sol`](script/Deploy.s.sol) for the optional parameters and their
-defaults.
+See [`docs/deploy.md`](docs/deploy.md) for the full deployment guide, including environment variables, verification, and on-chain setup.
 
 ## License
 
