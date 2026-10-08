@@ -8,7 +8,10 @@ import {ITrampoline} from 'interfaces/ITrampoline.sol';
 /// Implements EIP-1271 (approving any digest) so the trampoline's contract-signer path
 /// does not block the test — reentrancy and delta-check behaviour is what is under test.
 contract ReentrantClaimer is IERC1271 {
-  function isValidSignature(bytes32, bytes memory) external pure returns (bytes4) {
+  function isValidSignature(
+    bytes32,
+    bytes memory
+  ) external pure returns (bytes4) {
     return IERC1271.isValidSignature.selector;
   }
 

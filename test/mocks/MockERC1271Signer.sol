@@ -15,7 +15,10 @@ contract MockERC1271Signer is IERC1271 {
     approvedDigests[_digest] = true;
   }
 
-  function isValidSignature(bytes32 _hash, bytes memory) external view returns (bytes4) {
+  function isValidSignature(
+    bytes32 _hash,
+    bytes memory
+  ) external view returns (bytes4) {
     return approvedDigests[_hash] ? IERC1271.isValidSignature.selector : bytes4(0);
   }
 }
@@ -25,7 +28,10 @@ contract MockERC1271Signer is IERC1271 {
 contract RevertingERC1271Signer is IERC1271 {
   error AlwaysReverts();
 
-  function isValidSignature(bytes32, bytes memory) external pure returns (bytes4) {
+  function isValidSignature(
+    bytes32,
+    bytes memory
+  ) external pure returns (bytes4) {
     revert AlwaysReverts();
   }
 }
