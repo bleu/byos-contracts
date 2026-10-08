@@ -11,6 +11,7 @@ import {Trampoline} from 'contracts/Trampoline.sol';
 import {TrampolineFactory} from 'contracts/TrampolineFactory.sol';
 
 import {FeeOnTransferERC20} from '../mocks/FeeOnTransferERC20.sol';
+import {MockERC1271Signer, RevertingERC1271Signer} from '../mocks/MockERC1271Signer.sol';
 import {MockRouter} from '../mocks/MockRouter.sol';
 import {MockWETH} from '../mocks/MockWETH.sol';
 import {ReentrantClaimer} from '../mocks/ReentrantClaimer.sol';
@@ -982,6 +983,97 @@ contract TrampolineTest is Test {
     vm.prank(settlement, submitter);
     vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
     trampoline.execute(proposal, route, malleableSig);
+  }
+
+  // --- EIP-1271 contract signers ---
+
+  function test_eoa_signature_succeeds_before_contract_deployed_at_address() public {
+    // Baseline: while SUB_SOLVER has no code, the EOA path is taken and the
+    // signature verifies normally.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, signature);
+
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
+  function test_eoa_signature_fails_after_contract_deployed_at_address() public {
+    // The nonce-0 flip: if a sub-solver's signing key has never sent an on-chain
+    // transaction, someone can CREATE2-deploy a contract at that address. Once code
+    // lands there, the trampoline switches to the EIP-1271 path — the original EOA
+    // signature is no longer valid because the contract's isValidSignature does not
+    // recognise the raw ECDSA bytes.
+    // Simulated here by etching a MockERC1271Signer (no digests approved) at
+    // subSolver after the proposal is signed but before execute is called.
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    // A contract is deployed at the sub-solver address after signing.
+    MockERC1271Signer contractAtSubSolver = new MockERC1271Signer();
+    vm.etch(subSolver, address(contractAtSubSolver).code);
+    // No digest approved — isValidSignature returns bytes4(0).
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    trampoline.execute(proposal, route, signature);
+  }
+
+  function test_execute_eip1271_contract_signer_approves_digest() public {
+    // A contract sub-solver (EIP-1271) that pre-approves the proposal digest passes
+    // signature verification. The trampoline detects code at SUB_SOLVER and calls
+    // isValidSignature instead of ecrecover.
+    MockERC1271Signer signer = new MockERC1271Signer();
+    Trampoline contractTrampoline = Trampoline(payable(factory.ensureDeployed(address(signer))));
+
+    sellToken.mint(address(contractTrampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+
+    bytes32 digest = ProposalSigning.digest(factory.domainSeparator(), proposal, route);
+    signer.approveDigest(digest);
+
+    vm.prank(settlement, submitter);
+    contractTrampoline.execute(proposal, route, new bytes(0));
+
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+  }
+
+  function test_execute_eip1271_reverts_when_contract_returns_wrong_magic_bytes() public {
+    // A contract sub-solver that does not approve the digest returns bytes4(0) from
+    // isValidSignature, which SignatureChecker treats as an invalid signature.
+    MockERC1271Signer signer = new MockERC1271Signer();
+    Trampoline contractTrampoline = Trampoline(payable(factory.ensureDeployed(address(signer))));
+
+    sellToken.mint(address(contractTrampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    // Digest not approved — signer returns bytes4(0).
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    contractTrampoline.execute(proposal, route, new bytes(0));
+  }
+
+  function test_execute_eip1271_reverts_when_contract_signer_reverts() public {
+    // A contract sub-solver whose isValidSignature reverts is treated as an invalid
+    // signature: SignatureChecker catches the revert via staticcall and returns false,
+    // which the trampoline maps to Trampoline_InvalidSignature.
+    RevertingERC1271Signer signer = new RevertingERC1271Signer();
+    Trampoline contractTrampoline = Trampoline(payable(factory.ensureDeployed(address(signer))));
+
+    sellToken.mint(address(contractTrampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+
+    vm.prank(settlement, submitter);
+    vm.expectRevert(ITrampoline.Trampoline_InvalidSignature.selector);
+    contractTrampoline.execute(proposal, route, new bytes(0));
   }
 
   function test_double_execute_sequential_has_independent_deltas() public {
