@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {SignatureChecker} from '@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol';
 
 import {BUY_ETH_ADDRESS, ITrampoline, PROPOSAL_TYPEHASH} from 'interfaces/ITrampoline.sol';
 
@@ -142,20 +143,17 @@ contract Trampoline is ITrampoline {
       _digest := keccak256(_ptr, 0x42)
     }
 
-    // Raw ecrecover — skip OZ ECDSA library's malleability checks.
-    // The signature format (r || s || v) is fixed by the BYOS service; nonce
-    // handles replay, so s-malleability is not a concern.
-    address _recovered;
-    assembly ('memory-safe') {
-      let _ptr := mload(0x40)
-      mstore(_ptr, _digest)
-      mstore(add(_ptr, 0x20), byte(0, calldataload(add(_signature.offset, 0x40))))
-      mstore(add(_ptr, 0x40), calldataload(_signature.offset)) // r
-      mstore(add(_ptr, 0x60), calldataload(add(_signature.offset, 0x20))) // s
-      pop(staticcall(gas(), 0x01, _ptr, 0x80, _ptr, 0x20))
-      _recovered := mload(_ptr)
+    // SignatureChecker.isValidSignatureNowCalldata handles both signer types:
+    // - EOA: ECDSA.tryRecover (r || s || v, 65 bytes). Unlike the prior raw
+    //   ecrecover, this applies OZ's high-s malleability rejection. The behavior
+    //   change is harmless — nonce replay protection makes malleability moot —
+    //   but documented here so it is not mistaken for an oversight.
+    // - Contract (EIP-1271): staticcall to SUB_SOLVER.isValidSignature(digest,
+    //   signature); requires the EIP-1271 magic bytes in return. Reverts from
+    //   the contract are treated as an invalid signature (OZ staticcall pattern).
+    if (!SignatureChecker.isValidSignatureNowCalldata(SUB_SOLVER, _digest, _signature)) {
+      revert Trampoline_InvalidSignature();
     }
-    if (_recovered != SUB_SOLVER) revert Trampoline_InvalidSignature();
   }
 
   /// @dev Reads the settlement's balance of `_buyToken`; native ETH when BUY_ETH_ADDRESS

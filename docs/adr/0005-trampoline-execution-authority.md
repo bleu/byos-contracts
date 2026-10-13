@@ -26,9 +26,18 @@ The Trampoline's `execute` requires an EIP-712 signature from the sub-solver tha
 Why not BYOS-unilateral:
 
 - Sub-solver signatures ensure BYOS cannot act maliciously. Without on-chain proof of what the sub-solver authorized, BYOS could fabricate faults — substitute different interactions, submit a settlement that reverts, then debit the sub-solver's escrow under Track A. The signature makes each settlement's interactions verifiably consented to by the sub-solver, and any tampering fails on-chain verification.
-- The gas cost is a single `ecrecover` (~3k gas) per settlement — negligible against DEX swap costs.
+- The gas cost is a single `ecrecover` (~3k gas) or one `isValidSignature` staticcall per settlement — negligible against DEX swap costs.
 - Sub-solvers get an on-chain audit trail for disputes, which matters in a permissionless system with no pre-existing trust relationship.
 - Aligns with cow-shed (`cowdao-grants/cow-shed`), which implements the same pattern: a per-user, signature-gated, CREATE2 proxy with revert bubbling.
+
+### Signer type: EOA and EIP-1271 contract signers
+
+`SUB_SOLVER` may be an EOA or a contract implementing EIP-1271 (`isValidSignature`). The Trampoline uses OZ's `SignatureChecker.isValidSignatureNowCalldata`, which selects the verification path by checking `SUB_SOLVER.code.length`:
+
+- **EOA**: OZ ECDSA with high-s malleability rejection. This tightens the prior raw `ecrecover` (which skipped the high-s check), but is harmless — nonce replay protection makes s-malleability moot.
+- **Contract**: `staticcall` to `SUB_SOLVER.isValidSignature(digest, signature)`; requires the EIP-1271 magic bytes (`0x1626ba7e`). A reverting `isValidSignature` is treated as an invalid signature (OZ swallows the revert via `staticcall`).
+
+**Non-repudiation caveat for contract signers.** The non-repudiation guarantee (signed data recoverable from calldata) weakens when `SUB_SOLVER` is a mutable contract (e.g. a Gnosis Safe whose owner set can rotate). The signed calldata is still permanently in the transaction, but a sub-solver could change their contract's verification logic after execution, making the on-chain proof disputable off-chain. Immutable or append-only signing contracts preserve the full non-repudiation guarantee. BYOS may require contract sub-solvers to attest their signing contract is non-upgradeable as a gatekeeping condition.
 
 ### Submitter gating: `tx.origin` must hold the Escrow's SUBMITTER_ROLE
 
@@ -44,7 +53,7 @@ The EIP-712 signed struct is `ProposalData` with seven fields: `orderUidHash`, `
 
 ## Alternatives considered
 
-- **BYOS-unilateral execution (no signature on trampoline).** Simpler (no `ecrecover`), but sub-solvers have zero on-chain proof of consent. BYOS could fabricate faults. Rejected — the trust cost outweighs the small gas saving.
+- **BYOS-unilateral execution (no signature on trampoline).** Simpler (no `ecrecover` / `isValidSignature`), but sub-solvers have zero on-chain proof of consent. BYOS could fabricate faults. Rejected — the trust cost outweighs the small gas saving.
 - **No `interactionsHash` in signed struct (sign amounts only).** Follows the CoW order pattern more closely, but opens the fabricated-fault vector (substitute interactions, blame sub-solver for revert). Rejected — the threat model is inverted vs CoW orders.
 - **`escrow_account` in signed struct (delegated collateral).** Allows signing with one key, collateral from another. Rejected for v1 — complicates the escrow contract, and signer == escrow key is the cleanest invariant. Delegation is a v2 concern.
 - **Monotonic on-chain nonce (trampoline stores nonce mapping).** Initially rejected in favor of a storage-free trampoline, then adopted (COW-1254): the nonce mapping provides hard replay protection independent of BYOS trust, at the cost of one SSTORE per settlement (~20k gas cold / 5k warm). The submitter gate remains for third-party replay; the nonce check hardens against BYOS-side replay.

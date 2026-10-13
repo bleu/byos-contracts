@@ -4,37 +4,39 @@ Gas comparison between a Uniswap V2 settlement executed directly by GPv2Settleme
 
 ## Overview
 
-The Trampoline adds **~62k gas (+31%)** of overhead to a single-order settlement compared to a hypothetical direct execution by Settlement. This is the cost of structural isolation: signature verification, access control, the balance-delta floor check, and the token transfers in and out of the sandbox.
+The Trampoline adds **~89k gas (+44%)** of overhead to a single-order settlement compared to a hypothetical direct execution by Settlement. This is the cost of structural isolation: signature verification, access control, the balance-delta floor check, nonce storage, and the token transfers in and out of the sandbox.
 
 The benchmark settles a 1 ETH WETH-to-USDC sell order against Uniswap V2. Both paths use the same order, clearing prices, and swap route -- the only difference is whether Settlement executes the swap itself or delegates to the Trampoline. The route sends swap output directly to Settlement; any unconsumed sell tokens remain on the instance as the sub-solver's reclaimable residue ([ADR-0008](adr/0008-residue-disposition.md)).
 
 | Path | Gas | Overhead |
 |---|---|---|
 | Direct (Settlement calls Uniswap) | 199,920 | -- |
-| Trampoline (output to Settlement) | 262,412 | +62,492 (+31%) |
+| Trampoline (output to Settlement) | 288,702 | +88,782 (+44%) |
 
 ## Overhead Breakdown
 
 | Category | Gas | % |
 |---|---|---|
-| `WETH.transfer(Settlement -> Trampoline)` | ~25,000 | 40% |
-| Settlement calldata/memory overhead | ~18,800 | 30% |
-| `balanceOf(Settlement)` before snapshot (cold) | ~9,800 | 16% |
-| ABI decoding + memory inside execute | ~5,500 | 9% |
-| EIP-712 hashing + ecrecover (assembly) | ~3,200 | 5% |
-| `Escrow.hasRole()` submitter check | ~2,700 | 4% |
-| `execute()` CALL opcode (cold address) | ~2,600 | 4% |
+| `WETH.transfer(Settlement -> Trampoline)` | ~25,000 | 28% |
+| Nonce SSTORE (cold zero→nonzero) | ~20,000 | 23% |
+| Settlement calldata/memory overhead | ~18,800 | 21% |
+| `balanceOf(Settlement)` before snapshot (cold) | ~9,800 | 11% |
+| ABI decoding + memory inside execute | ~5,500 | 6% |
+| Nonce SLOAD (cold check) | ~2,100 | 2% |
+| EIP-712 hashing + SignatureChecker | ~3,200 | 4% |
+| `Escrow.hasRole()` submitter check | ~2,700 | 3% |
+| `execute()` CALL opcode (cold address) | ~2,600 | 3% |
 | `Executed` event | ~1,500 | 2% |
-| `balanceOf(Settlement)` after snapshot (warm) | ~1,300 | 2% |
-| Warm/cold storage diff on approve | +4,000 | 6% |
-| Warm savings (USDC slot pre-warmed by before-snapshot) | -11,000 | -18% |
-| **Total** | **~62,500** | |
+| `balanceOf(Settlement)` after snapshot (warm) | ~1,300 | 1% |
+| Warm/cold storage diff on approve | +4,000 | 5% |
+| Warm savings (USDC slot pre-warmed by before-snapshot) | -11,000 | -12% |
+| **Total** | **~88,500** | |
 
 The warm savings entry is negative because the delta check's before-snapshot reads Settlement's USDC balance slot (cold, ~9,800), which warms it for the Uniswap pair's subsequent `USDC.transfer` to Settlement. In the direct path, that same transfer hits the slot cold and pays ~11,000 more. The cold read cost is paid once in both paths -- it just shifts between callsites. The net cost of the delta check is effectively just the after-snapshot (~1,300, warm).
 
 ### Note on buy orders
 
-The numbers above are for sell orders, where the route consumes all sellToken and sends output directly to Settlement. In buy orders using `swapTokensForExactTokens`, the route leaves unconsumed sellToken on the instance as the sub-solver's reclaimable residue — there is no sweep back to Settlement. The measured buy-order overhead is +63,140 gas (+32%), comparable to sell orders; the sub-solver claims residue separately via `claimToken`/`claimTokens`. A buy order benchmark scenario is included in the test suite.
+The numbers above are for sell orders, where the route consumes all sellToken and sends output directly to Settlement. In buy orders using `swapTokensForExactTokens`, the route leaves unconsumed sellToken on the instance as the sub-solver's reclaimable residue — there is no sweep back to Settlement. The measured buy-order overhead is +89,370 gas (+45%), comparable to sell orders; the sub-solver claims residue separately via `claimToken`/`claimTokens`. A buy order benchmark scenario is included in the test suite.
 
 ## Other Optimizations Considered
 
