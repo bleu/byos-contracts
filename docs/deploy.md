@@ -68,3 +68,10 @@ This step requires a block explorer API key configured in `foundry.toml` under `
 ## Fund the operator
 
 Send native tokens to the `ESCROW_OPERATOR` address. The operator wallet submits penalty transactions on-chain and must have enough balance to cover gas costs.
+
+## Retire a deployment generation
+
+Deploying a new factory does not disable old Trampolines or invalidate their outstanding signatures.
+Stop submitting settlements for the old generation and let in-flight settlements complete.
+The old Escrow's admin must revoke every `SUBMITTER_ROLE` holder, including auxiliary EOAs.
+Verify all revocations with `hasRole`; old Trampolines remain executable until every submitter is revoked.
