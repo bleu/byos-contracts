@@ -68,3 +68,41 @@ This step requires a block explorer API key configured in `foundry.toml` under `
 ## Fund the operator
 
 Send native tokens to the `ESCROW_OPERATOR` address. The operator wallet submits penalty transactions on-chain and must have enough balance to cover gas costs.
+
+## Retire a deployment generation
+
+Deploying a new Escrow/factory separates signing domains; it does **not** disable old
+Trampolines or invalidate signatures on them. Each old instance retains its original
+domain and checks submitter authorization against its original Escrow. An unexpired,
+unused proposal can still execute there while any submitter remains authorized.
+
+When deprecating a factory, the old Escrow's admin must revoke **every** holder of
+`SUBMITTER_ROLE`, including auxiliary EOAs used by a 7702 delegate:
+
+1. Stop selecting proposals and submitting settlements for the old generation. For a
+   planned migration, drain in-flight settlements before revoking roles. During an
+   incident, revoke promptly, accepting that pending settlements may revert.
+2. Reconstruct the current submitter set from the old Escrow's `RoleGranted` and
+   `RoleRevoked` events starting at deployment, and confirm membership with
+   `hasRole`. Include grants made after deployment; the original `BYOS_SUBMITTERS`
+   list alone is insufficient. The contract does not enumerate role members.
+3. From the old Escrow's admin account, call
+   `revokeRole(SUBMITTER_ROLE, submitter)` for every remaining holder. Confirm each
+   transaction and verify `hasRole(SUBMITTER_ROLE, submitter) == false`.
+4. Recheck role events through the final revocation block to ensure no holder was
+   missed or added during retirement. Keep the old generation disabled in the BYOS
+   service and monitor subsequent role grants; an admin can re-enable execution by
+   granting the role again.
+
+Revoking all submitters blocks `execute` on every Trampoline tied to that Escrow,
+including instances deployed later. Pausing the Escrow or removing a solver from the
+new generation's submitter set does not revoke access to old instances. Retirement
+does not require renouncing the old Escrow's admin role: retain the access needed to
+manage collateral migration. Sub-solvers can still claim residue from old
+Trampolines and withdraw collateral subject to the existing withdrawal controls.
+
+If revocation is skipped, a compromised old submitter key can execute an outstanding
+signed route against capital left on an old instance, even after the service has
+migrated. The route must still satisfy its signature, expiry, nonce, and output-floor
+checks, but it may spend residue or pre-funded capital at an unintended time or grant
+allowances that expose later funding. A new deployment alone does not prevent this.

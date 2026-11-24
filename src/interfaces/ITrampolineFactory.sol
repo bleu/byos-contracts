@@ -6,7 +6,9 @@ pragma solidity ^0.8.28;
  * @author CoW Protocol Developers
  * @notice CREATE2 deployer for per-sub-solver Trampoline instances and the EIP-712
  * domain anchor for proposal signatures (ADR-0005): signatures verify against this
- * factory's domain, so a factory redeployment cleanly invalidates old signatures.
+ * factory's domain, so old signatures do not verify on a new generation. Redeployment
+ * does not disable old instances: revoke every SUBMITTER_ROLE holder on the old
+ * Escrow when retiring a generation.
  */
 interface ITrampolineFactory {
   /*///////////////////////////////////////////////////////////////
