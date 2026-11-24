@@ -54,13 +54,16 @@ interface ITrampolineFactory {
   ) external returns (address _instance);
 
   /**
-   * @notice Returns the EIP-712 domain separator proposal signatures are verified against
+   * @notice Returns the deployment-time EIP-712 domain separator proposal signatures are verified against
+   * @dev Frozen for the factory's lifetime, including after a chain-ID change. This keeps
+   * instance addresses stable but does not invalidate signatures on a changed-ID fork.
    * @return _domainSeparator The domain separator
    */
   function domainSeparator() external view returns (bytes32 _domainSeparator);
 
   /**
    * @notice Returns the deterministic CREATE2 address of a sub-solver's Trampoline instance
+   * @dev Uses the frozen deployment-time domain, so the address is stable across chain-ID changes
    * @param _subSolver The sub-solver to compute the address for
    * @return _trampoline The instance address, deployed or not
    */
