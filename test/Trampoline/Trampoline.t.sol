@@ -142,6 +142,30 @@ contract TrampolineTest is Test {
 
   // --- Gates ---
 
+  function test_execute_after_chain_id_change_accepts_original_domain_and_preserves_nonce() public {
+    sellToken.mint(address(trampoline), SELL_AMOUNT);
+    ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);
+    ITrampoline.Proposal memory proposal = _proposal();
+    bytes memory signature = _sign(subSolverKey, proposal, route);
+
+    vm.chainId(block.chainid + 1);
+
+    assertEq(factory.ensureDeployed(subSolver), address(trampoline));
+    assertEq(factory.domainSeparator(), trampoline.DOMAIN_SEPARATOR());
+    vm.expectEmit(address(trampoline));
+    emit ITrampoline.Executed(proposal.orderUidHash, BUY_AMOUNT, BUY_AMOUNT, BUY_AMOUNT);
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, signature);
+
+    assertEq(buyToken.balanceOf(settlement), BUY_AMOUNT);
+    assertTrue(trampoline.noncesUsed(proposal.nonce));
+    assertEq(factory.ensureDeployed(subSolver), address(trampoline));
+
+    vm.expectRevert(ITrampoline.Trampoline_NonceAlreadyUsed.selector);
+    vm.prank(settlement, submitter);
+    trampoline.execute(proposal, route, signature);
+  }
+
   function test_execute_reverts_when_caller_not_settlement() public {
     sellToken.mint(address(trampoline), SELL_AMOUNT);
     ITrampoline.Interaction[] memory route = _swapRoute(BUY_AMOUNT);

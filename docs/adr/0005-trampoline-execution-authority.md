@@ -43,6 +43,21 @@ Why not BYOS-unilateral:
 
 Once BYOS settles a proposal, its signature and route are public calldata, so while `validUntil` is live any other allow-listed CoW solver could replay or front-run the `execute` in its own settlement — rerunning the signed route outside BYOS's control and muddying Track A attribution. `execute` therefore also requires `tx.origin` to hold the Escrow's grantable `SUBMITTER_ROLE` — granted at deploy time to the solver EOA and, for parallel submission through CoW's `Solver7702Delegate`, each approved auxiliary account.
 
+### Deployment-time domain
+
+Freeze the factory's domain separator at deployment, including its chain ID, rather
+than rebuilding it after a chain-ID change. The domain is part of the Trampoline's
+CREATE2 init code: changing it would project a second address for the same sub-solver,
+splitting residue, approvals, and nonce state. Freezing it keeps deployment identity
+consistent with the separator already stored immutably by each Trampoline. Domain
+introspection must describe that same deployment-time domain.
+
+This deliberately accepts fork replay risk: an unexpired proposal with an unused
+nonce may execute on both branches if the submitter remains authorized on each.
+Nonce consumption is local to each branch. A chain-ID change therefore requires an
+operational decision about which deployment to continue using; it does not itself
+invalidate outstanding signatures.
+
 ### Proposal payload shape: raw interactions
 
 `Vec<{target, value, calldata}>` — the sub-solver encodes arbitrary calls against any DEX or protocol. The Trampoline executes them as-is.

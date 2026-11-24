@@ -65,6 +65,20 @@ forge verify-contract <ESCROW_ADDRESS> \
 
 This step requires a block explorer API key configured in `foundry.toml` under `[etherscan]`. See [Foundry verification docs](https://book.getfoundry.sh/forge/deploying#verifying-a-pre-existing-contract) for chain-specific setup.
 
+## Chain-ID changes and forks
+
+The factory's EIP-712 domain is frozen at deployment, including its chain ID. Its
+`domainSeparator()` and `eip712Domain()` continue to describe that original domain
+after a chain-ID change, and existing and future Trampoline addresses remain stable.
+Clients must use the deployment-time domain when signing for this generation.
+
+This does not provide changed-chain replay protection: an unexpired proposal with an
+unused nonce can remain executable on both fork branches if its submitter is still
+authorized. Nonces are consumed independently on each branch. Before continuing
+operation after a fork, decide which generation to use on each branch and revoke
+all submitters on any generation being retired. Deploy a new Escrow/factory if a
+new signing domain is required.
+
 ## Fund the operator
 
 Send native tokens to the `ESCROW_OPERATOR` address. The operator wallet submits penalty transactions on-chain and must have enough balance to cover gas costs.
